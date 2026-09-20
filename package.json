@@ -1,0 +1,35 @@
+{
+  "name": "jui-graph-ts",
+  "version": "0.1.0",
+  "description": "Framework-agnostic TypeScript port of juijs-graph (the SVG/canvas chart engine underlying jui-chart), using native ES classes instead of the original runtime module registry (chart.brush.core-style jui.use()/jui.include() extend chains).",
+  "type": "module",
+  "main": "dist-lib/jui-graph-ts.cjs.js",
+  "module": "dist-lib/jui-graph-ts.es.js",
+  "types": "dist-lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist-lib/index.d.ts",
+      "import": "./dist-lib/jui-graph-ts.es.js",
+      "require": "./dist-lib/jui-graph-ts.cjs.js"
+    }
+  },
+  "files": [
+    "dist-lib"
+  ],
+  "scripts": {
+    "dev": "vite",
+    "build:lib": "tsc -p tsconfig.lib.json --noEmit && vite build -c vite.lib.config.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@vitest/coverage-v8": "^5.0.1",
+    "jsdom": "^30.0.1",
+    "typescript": "~6.0.2",
+    "vite": "^8.3.0",
+    "vite-plugin-dts": "^5.1.0",
+    "vitest": "^5.0.1"
+  }
+}

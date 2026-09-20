@@ -1,0 +1,112 @@
+// Port of juijs-graph's `src/util/svg/element.transform.js` ("util.svg.element.transform").
+// Extends `element.ts`'s `Element` with an SVG `transform="..."` attribute builder.
+
+import { Element } from "./element";
+
+type TransformKey = "translate" | "scale" | "rotate" | "skew" | "matrix";
+
+export class TransElement extends Element {
+  // Plain object (not a `Map`) so `for...in` iterates in this EXACT declaration order -
+  // `applyOrders()` below composes the final `transform` string by iterating these keys in
+  // this fixed order (translate, scale, rotate, skew, matrix) regardless of which order the
+  // individual `.translate()`/`.rotate()`/etc. setters were actually called in. Preserved from
+  // the original: `elem.rotate(30).translate(1,2)` still produces `"translate(1,2) rotate(30)"`.
+  private transformOrders: Record<TransformKey, string | null> = {
+    translate: null,
+    scale: null,
+    rotate: null,
+    skew: null,
+    matrix: null,
+  };
+
+  private applyOrders(): void {
+    const orderArr: string[] = [];
+
+    (Object.keys(this.transformOrders) as TransformKey[]).forEach((key) => {
+      if (this.transformOrders[key]) orderArr.push(this.transformOrders[key]!);
+    });
+
+    this.attr({ transform: orderArr.join(" ") });
+  }
+
+  private static getStringArgs(args: unknown[]): string {
+    return args.join(",");
+  }
+
+  translate(...args: unknown[]): this {
+    this.transformOrders.translate = "translate(" + TransElement.getStringArgs(args) + ")";
+    this.applyOrders();
+
+    return this;
+  }
+
+  /**
+   * `rotate(angle)` (single arg) or `rotate(angle, x, y)` (three args) are the two documented
+   * forms. **Preserved bug**: any OTHER argument count (e.g. `rotate(angle, x)`, two args) falls
+   * through both branches, leaving the interpolated value `undefined` - producing the literal
+   * string `"rotate(undefined)"` rather than throwing or ignoring the call.
+   */
+  rotate(...args: unknown[]): this {
+    let str: unknown;
+
+    if (args.length === 1) {
+      str = args[0];
+    } else if (args.length === 3) {
+      str = args[0] + " " + args[1] + "," + args[2];
+    }
+
+    this.transformOrders.rotate = "rotate(" + str + ")";
+    this.applyOrders();
+
+    return this;
+  }
+
+  scale(...args: unknown[]): this {
+    this.transformOrders.scale = "scale(" + TransElement.getStringArgs(args) + ")";
+    this.applyOrders();
+
+    return this;
+  }
+
+  skew(...args: unknown[]): this {
+    this.transformOrders.skew = "skew(" + TransElement.getStringArgs(args) + ")";
+    this.applyOrders();
+
+    return this;
+  }
+
+  matrix(...args: unknown[]): this {
+    this.transformOrders.matrix = "matrix(" + TransElement.getStringArgs(args) + ")";
+    this.applyOrders();
+
+    return this;
+  }
+
+  /**
+   * Extracts one transform component's raw text out of the current `transform` attribute.
+   *
+   * **Preserved bug**: each regex is a negated CHARACTER CLASS built from the individual
+   * letters of its own name plus parens - e.g. `translate: /[^translate()]+/g` means "one or
+   * more characters that are none of the letters t/r/a/n/s/l/e or ( or )", which is nothing
+   * like matching the substring `"translate(...)"`. This is a classic `[^...]` vs. a real
+   * "strip this token" pattern mixup in the original, reproduced byte-for-byte (including that
+   * `text.match(regex)` can return `null` and `[0]` on that throws, same as the original - no
+   * added guard).
+   */
+  data(type: TransformKey): string | null {
+    const text = this.attr("transform");
+    const regex: Record<TransformKey, RegExp> = {
+      translate: /[^translate()]+/g,
+      rotate: /[^rotate()]+/g,
+      scale: /[^scale()]+/g,
+      skew: /[^skew()]+/g,
+      matrix: /[^matrix()]+/g,
+    };
+
+    if (typeof text === "string") {
+      return text.match(regex[type])![0];
+    }
+
+    return null;
+  }
+}
