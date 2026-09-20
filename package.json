@@ -16,6 +16,9 @@
   "files": [
     "dist-lib"
   ],
+  "dependencies": {
+    "jui-core-ts": "file:../jui-core-ts"
+  },
   "scripts": {
     "dev": "vite",
     "build:lib": "tsc -p tsconfig.lib.json --noEmit && vite build -c vite.lib.config.ts",

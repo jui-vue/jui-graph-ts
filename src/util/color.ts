@@ -9,21 +9,34 @@
 // itself - only `ColorUtil.parse`, for gradient-string parsing in `base/builder.js`, is actually
 // used internally). This is therefore the first real 1:1 port of the whole file.
 //
-// Quirks/bugs preserved byte-faithfully:
-//  - `rgb()` returns its input completely unchanged when given a non-string, AND when given a
-//    string that doesn't match any of the `rgb(`/`rgba(`/`#`-prefixed branches (e.g. a bare CSS
-//    color name like `"red"`) - not parsed, not an error, just passed through. Typed loosely here
-//    (`RgbColor | string`) to reflect that.
-//  - `parseGradient()` similarly returns its input unchanged (a bare string, not a gradient
-//    descriptor object) when the `linear(...)`/`radial(...)` regex doesn't match.
-//  - `scale().ticks(n)` walks `t` from 0 to 1 in `1/n` steps using `math.plus` (decimal-safe
-//    addition) specifically to dodge floating-point drift in the loop's `<= 1` termination check -
-//    preserved by importing this project's own `plus()` from `./math.ts`.
-//  - `colorHash`'s `generateHash` only looks at the first 6 characters of the name (`max_char = 6`
-//    - note the loop's `i > max_char` check means it actually reads indices 0-6, i.e. 7
-//    characters, an off-by-one against the "6 characters" doc comment - preserved as-is).
+// RECONCILED with jui-core-ts (see this project's PORT_STATUS.md "jui-core-ts reconciliation"
+// entry): `format`/`rgb`/`scale`/`map`/`HSVtoRGB`/`RGBtoHSV`/`lighten`/`darken`/`colorHash` are
+// verified behaviorally identical to jui-core-ts's own `src/utils/color.ts` and now delegate to
+// it. `parseGradient`/`parseStop`/`parseAttr` (and the `GradientStop`/`GradientDescriptor`/
+// `LinearAttr`/`RadialAttr` shapes) stay fully local: jui-core-ts's `parseStop` puts the parsed
+// stop `offset` inside `attr.offset` uniformly, while this file's original - and this port of it -
+// preserves a genuine original bug where the interpolation pass reads/writes a *separate*,
+// never-populated top-level `stop.offset` field (see `parseStop`'s doc comment and this project's
+// PORT_STATUS.md). Reconciling that would change this file's actual output shape, not just its
+// implementation, so it wasn't attempted.
+//
+// Quirks/bugs preserved byte-faithfully (in the functions that stayed local):
+//  - `parseGradient()` returns its input unchanged (a bare string, not a gradient descriptor
+//    object) when the `linear(...)`/`radial(...)` regex doesn't match.
+//  - `parseStop`: see the RECONCILED note above and this function's own doc comment.
 
-import { plus } from './math'
+import { ColorUtil } from 'jui-core-ts'
+const {
+  format: coreFormat,
+  rgb: coreRgb,
+  scale: coreScale,
+  map: coreMap,
+  HSVtoRGB: coreHSVtoRGB,
+  RGBtoHSV: coreRGBtoHSV,
+  lighten: coreLighten,
+  darken: coreDarken,
+  colorHash: coreColorHash,
+} = ColorUtil
 
 export interface RgbColor {
   r: number
@@ -38,34 +51,6 @@ export interface HsvColor {
   v: number
 }
 
-function generateHash(name: string): number {
-  // Return a vector (0.0->1.0) that is a hash of the input string.
-  // The hash is computed to favor early characters over later ones, so
-  // that strings with similar starts have similar vectors. Only the first
-  // 6 characters are considered.
-  let hash = 0
-  let weight = 1
-  let maxHash = 0
-  const mod = 10
-  const maxChar = 6
-
-  if (name) {
-    for (let i = 0; i < name.length; i++) {
-      if (i > maxChar) {
-        break
-      }
-      hash += weight * (name.charCodeAt(i) % mod)
-      maxHash += weight * (mod - 1)
-      weight *= 0.7
-    }
-    if (maxHash > 0) {
-      hash = hash / maxHash
-    }
-  }
-
-  return hash
-}
-
 /** Matches a `linear(...)`/`radial(...)` gradient descriptor string. */
 export const regex = /(linear|radial)\((.*)\)(.*)/i
 
@@ -78,25 +63,7 @@ export const regex = /(linear|radial)\((.*)\)(.*)/i
  * Returns `obj` unchanged for any other `type` (matching the original).
  */
 export function format(obj: RgbColor, type?: string): string | RgbColor {
-  if (type == 'hex') {
-    let r = obj.r.toString(16)
-    if (obj.r < 16) r = '0' + r
-
-    let g = obj.g.toString(16)
-    if (obj.g < 16) g = '0' + g
-
-    let b = obj.b.toString(16)
-    if (obj.b < 16) b = '0' + b
-
-    return '#' + [r, g, b].join('').toUpperCase()
-  } else if (type == 'rgb') {
-    if (typeof obj.a == 'undefined') {
-      return 'rgb(' + [obj.r, obj.g, obj.b].join(',') + ')'
-    } else {
-      return 'rgba(' + [obj.r, obj.g, obj.b, obj.a].join(',') + ')'
-    }
-  }
-
+  if (type === 'hex' || type === 'rgb') return coreFormat(obj, type)
   return obj
 }
 
@@ -110,37 +77,7 @@ export function trim(str: string): string {
  * file's header comment.
  */
 export function rgb(str: string | RgbColor): RgbColor | string {
-  if (typeof str == 'string') {
-    if (str.indexOf('rgb(') > -1) {
-      const parts = str.replace('rgb(', '').replace(')', '').split(',')
-      const arr = parts.map((v) => parseInt(trim(v), 10))
-
-      return { r: arr[0], g: arr[1], b: arr[2], a: 1 }
-    } else if (str.indexOf('rgba(') > -1) {
-      const parts = str.replace('rgba(', '').replace(')', '').split(',')
-      const arr = parts.map((v, i) => (i === parts.length - 1 ? parseFloat(trim(v)) : parseInt(trim(v), 10)))
-
-      return { r: arr[0], g: arr[1], b: arr[2], a: arr[3] }
-    } else if (str.indexOf('#') == 0) {
-      const hex = str.replace('#', '')
-      const arr: number[] = []
-
-      if (hex.length == 3) {
-        for (let i = 0; i < hex.length; i++) {
-          const char = hex.substr(i, 1)
-          arr.push(parseInt(char + char, 16))
-        }
-      } else {
-        for (let i = 0; i < hex.length; i += 2) {
-          arr.push(parseInt(hex.substr(i, 2), 16))
-        }
-      }
-
-      return { r: arr[0], g: arr[1], b: arr[2], a: 1 }
-    }
-  }
-
-  return str
+  return coreRgb(str) as RgbColor | string
 }
 
 export interface ColorScale {
@@ -157,41 +94,7 @@ export interface ColorScale {
  *     c.ticks(20)    // middle color LIST: [startColor, ..., endColor], as hex strings
  */
 export function scale(): ColorScale {
-  let startColor: RgbColor
-  let endColor: RgbColor
-
-  const func = ((t: number, type?: string): string | RgbColor => {
-    const obj: RgbColor = {
-      r: parseInt(String(startColor.r + (endColor.r - startColor.r) * t), 10),
-      g: parseInt(String(startColor.g + (endColor.g - startColor.g) * t), 10),
-      b: parseInt(String(startColor.b + (endColor.b - startColor.b) * t), 10),
-    }
-
-    return format(obj, type)
-  }) as ColorScale
-
-  func.domain = (start, end) => {
-    startColor = rgb(start) as RgbColor
-    endColor = rgb(end) as RgbColor
-
-    return func
-  }
-
-  func.ticks = (n: number): string[] => {
-    const unit = 1 / n
-
-    let start = 0
-    const colors: string[] = []
-    while (start <= 1) {
-      const c = func(start, 'hex') as string
-      colors.push(c)
-      start = plus(start, unit)
-    }
-
-    return colors
-  }
-
-  return func
+  return coreScale() as unknown as ColorScale
 }
 
 export interface ColorMap {
@@ -211,31 +114,7 @@ export interface ColorMap {
  *
  *     const colors = map(['#352a87', '#0f5cdd', '#00b5a6', '#ffc337', '#fdff00'], count)
  */
-export const map = ((colorList: (string | RgbColor)[], count?: number): string[] => {
-  let colors: string[] = []
-  count = count || 5
-  const s = scale()
-
-  for (let i = 0, len = colorList.length - 1; i < len; i++) {
-    if (i == 0) {
-      colors = s.domain(colorList[i], colorList[i + 1]).ticks(count)
-    } else {
-      const colors2 = s.domain(colorList[i], colorList[i + 1]).ticks(count)
-      colors2.shift()
-      colors = colors.concat(colors2)
-    }
-  }
-
-  return colors
-}) as ColorMap
-
-map.parula = (count) => map(['#352a87', '#0f5cdd', '#00b5a6', '#ffc337', '#fdff00'], count)
-map.jet = (count) => map(['#00008f', '#0020ff', '#00ffff', '#51ff77', '#fdff00', '#ff0000', '#800000'], count)
-map.hsv = (count) => map(['#ff0000', '#ffff00', '#00ff00', '#00ffff', '#0000ff', '#ff00ff', '#ff0000'], count)
-map.hot = (count) => map(['#0b0000', '#ff0000', '#ffff00', '#ffffff'], count)
-map.pink = (count) => map(['#1e0000', '#bd7b7b', '#e7e5b2', '#ffffff'], count)
-map.bone = (count) => map(['#000000', '#4a4a68', '#a6c6c6', '#ffffff'], count)
-map.copper = (count) => map(['#000000', '#3d2618', '#9d623e', '#ffa167', '#ffc77f'], count)
+export const map = coreMap as unknown as ColorMap
 
 /**
  * Converts HSV (H: 0-360, S/V: 0-1) to RGB (0-255 channels, `Math.ceil`-rounded).
@@ -243,91 +122,21 @@ map.copper = (count) => map(['#000000', '#3d2618', '#9d623e', '#ffa167', '#ffc77
  *     HSVtoRGB(0, 0, 1)  // { r: 255, g: 255, b: 255 }
  */
 export function HSVtoRGB(H: number, S: number, V: number): RgbColor {
-  if (H == 360) {
-    H = 0
-  }
-
-  const C = S * V
-  const X = C * (1 - Math.abs(((H / 60) % 2) - 1))
-  const m = V - C
-
-  let temp: number[] = []
-
-  if (0 <= H && H < 60) {
-    temp = [C, X, 0]
-  } else if (60 <= H && H < 120) {
-    temp = [X, C, 0]
-  } else if (120 <= H && H < 180) {
-    temp = [0, C, X]
-  } else if (180 <= H && H < 240) {
-    temp = [0, X, C]
-  } else if (240 <= H && H < 300) {
-    temp = [X, 0, C]
-  } else if (300 <= H && H < 360) {
-    temp = [C, 0, X]
-  }
-
-  return {
-    r: Math.ceil((temp[0] + m) * 255),
-    g: Math.ceil((temp[1] + m) * 255),
-    b: Math.ceil((temp[2] + m) * 255),
-  }
+  return coreHSVtoRGB(H, S, V)
 }
 
 /** Converts RGB (0-255 channels) to HSV (H: 0-360, S/V: 0-1). */
 export function RGBtoHSV(R: number, G: number, B: number): HsvColor {
-  const R1 = R / 255
-  const G1 = G / 255
-  const B1 = B / 255
-
-  const MaxC = Math.max(R1, G1, B1)
-  const MinC = Math.min(R1, G1, B1)
-
-  const DeltaC = MaxC - MinC
-
-  let H = 0
-
-  if (DeltaC == 0) {
-    H = 0
-  } else if (MaxC == R1) {
-    H = 60 * (((G1 - B1) / DeltaC) % 6)
-  } else if (MaxC == G1) {
-    H = 60 * ((B1 - R1) / DeltaC + 2)
-  } else if (MaxC == B1) {
-    H = 60 * ((R1 - G1) / DeltaC + 4)
-  }
-
-  if (H < 0) {
-    H = 360 + H
-  }
-
-  let S = 0
-
-  if (MaxC == 0) S = 0
-  else S = DeltaC / MaxC
-
-  const V = MaxC
-
-  return { h: H, s: S, v: V }
+  return coreRGBtoHSV(R, G, B)
 }
 
 /** Lightens (positive `rate`) or darkens (negative `rate`) a `#rrggbb` color string. */
 export function lighten(color: string, rate: number): string {
-  color = color.replace(/[^0-9a-f]/gi, '')
-  rate = rate || 0
-
-  const rgbParts: string[] = []
-  for (let i = 0; i < 6; i += 2) {
-    let c = parseInt(color.substr(i, 2), 16)
-    const cStr = Math.round(Math.min(Math.max(0, c + c * rate), 255)).toString(16)
-    rgbParts.push(('00' + cStr).substr(cStr.length))
-  }
-
-  return '#' + rgbParts.join('')
+  return coreLighten(color, rate)
 }
 
 export function darken(color: string, rate: number): string {
-  return lighten(color, -rate)
+  return coreDarken(color, rate)
 }
 
 /** Gradient color string parsing - alias for `parseGradient`. */
@@ -507,21 +316,5 @@ export function parseAttr(type: string, str: string): LinearAttr | RadialAttr {
  * given).
  */
 export function colorHash(name?: string, callback?: (vector: number) => unknown): RgbColor | unknown {
-  let vector = 0
-
-  if (name) {
-    name = name.replace(/.*`/, '') // drop module name if present
-    name = name.replace(/\(.*/, '') // drop extra info
-    vector = generateHash(name)
-  }
-
-  if (typeof callback == 'function') {
-    return callback(vector)
-  }
-
-  return {
-    r: 200 + Math.round(55 * vector),
-    g: 0 + Math.round(230 * (1 - vector)),
-    b: 0 + Math.round(55 * (1 - vector)),
-  }
+  return callback ? coreColorHash(name, callback) : coreColorHash(name)
 }

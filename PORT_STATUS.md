@@ -31,6 +31,51 @@ plan — that work is not wasted if `jui-core-ts` happens later; it just becomes
 two into one shared implementation retroactively (similar in spirit to jui-chart-vue's Phase F treemap-squared
 consolidation). Do not start `jui-core-ts` proactively — wait for it to be explicitly requested.
 
+### `jui-core-ts` reconciliation (done)
+
+`jui-core-ts` (`/home/search5/cl/jui-core-ts`) was built in a later session and explicitly requested to be
+wired up here. Added as a real dependency: `"jui-core-ts": "file:../jui-core-ts"` in `package.json`.
+
+**`src/util/math.ts`** — `rotate`/`resize`/`radian`/`degree`/`angle`/`interpolateNumber`/`interpolateRound`/
+`getFixed`/`round`/`plus`/`minus`/`multi`/`div`/`remain`/`scaleValue` now delegate to jui-core-ts's `MathUtil`
+namespace (verified byte-identical logic, no preserved-bug divergence). **`fixed`/`nice`/`matrix`/`matrix3d`/
+`inverseMatrix3d` stay fully local** - jui-core-ts is not bound by this project's Phase 0 rule 6, so its own
+port of these either fixed the bugs outright (`nice`'s `niceFraction` typo doesn't reproduce - jui-core-ts
+just declares the variable correctly, so its `isNice: true` branch returns a real result instead of throwing;
+`inverseMatrix3d`'s `te[3][4]`→`te[3][3]` fix, described in jui-core-ts's own PORT_STATUS.md) or uses
+incompatible types (`matrix3d`'s `Mat4` 4-tuple vs jui-core-ts's plain `Float32Array[]`). Delegating any of
+these five would have silently changed this project's actual runtime output and broken the PRESERVED BUG
+tests in `math.spec.ts` (`nice(...,true)` throwing, `inverseMatrix3d(identity)`'s `[3][3]` staying `0`,
+`fixed(x).div()` throwing) - confirmed by trying it first and getting exactly those test failures before
+reverting to local.
+
+**`src/util/color.ts`** — `format`/`rgb`/`scale`/`map`/`HSVtoRGB`/`RGBtoHSV`/`lighten`/`darken`/`colorHash`
+now delegate to jui-core-ts's `ColorUtil` namespace. **`parseGradient`/`parseStop`/`parseAttr` (and the
+`GradientStop`/`GradientDescriptor`/`LinearAttr`/`RadialAttr` shapes) stay fully local** - this surfaced a
+real, previously-undocumented divergence: jui-core-ts's `parseStop` stores the parsed stop offset uniformly
+inside `attr.offset`, while the original (and this project's faithful port, and jui-chart-vue's independently
+hand-traced `colorParser.ts`) has the offset land in `attr.offset` for *parsing* but the "interpolate missing
+offsets" pass reads/writes a **separate, never-populated top-level `stop.offset`** field - a genuine upstream
+bug (see `parseStop`'s doc comment; jui-chart-vue's `colorParser.ts` even confirms it can *throw* for a 3+-stop
+gradient with an interior gap). jui-core-ts unintentionally "fixed" this by unifying both into `attr.offset` -
+correct behavior, but a different output shape and a different original bug than what this project (and
+jui-chart-vue) verified and preserved. Reconciling would mean either regressing jui-core-ts's fix or breaking
+this project's own preserved-bug fidelity, so `color.ts`'s gradient-parsing trio was left alone.
+
+**`src/util/dom.ts`** — **not reconciled**, left fully local. Its `find`/`attr`/`each` gracefully degrade on
+malformed input (e.g. `find(123, 456)` returns an empty `NodeList` - see `dom.spec.ts`'s "type checking"
+suite) via a local `typeCheck` guard; jui-core-ts's own `dom.ts` doesn't replicate that defensive behavior and
+would throw instead. Not worth weakening either side's behavior to de-duplicate ~150 lines with zero
+preserved-bug stakes either way.
+
+Verified: `npx tsc -p tsconfig.json --noEmit` clean, `npx vitest run` still 934/934 passing (including every
+PRESERVED BUG/QUIRK test), `npm run build:lib` clean. Downstream `jui-chart-vue` (which already depends on
+`jui-graph-ts` and re-exports a `mathUtil` subset via its own `composables/mathUtil.ts`) needed zero changes -
+its 732 tests still pass unchanged, and its own `mathUtil.ts`/`colorParser.ts` had *already*, independently,
+made the identical "delegate the safe subset, keep `nice`/the gradient-offset bug local" call (see those
+files' own doc comments) - good convergent validation that this reconciliation drew the line in the right
+place.
+
 ## Phase 0 — Architecture decisions (read this before porting any file)
 
 These apply to every phase below. Do not re-litigate them per file; if a file seems to need an exception,

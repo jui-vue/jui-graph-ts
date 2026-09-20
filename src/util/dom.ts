@@ -1,6 +1,14 @@
 /**
  * DOM utility module - ported from jui-graph's util/dom.js
  * Provides DOM query, manipulation, and utility functions
+ *
+ * NOT reconciled with jui-core-ts's own `src/utils/dom.ts` (see this project's PORT_STATUS.md
+ * "jui-core-ts reconciliation" entry): this file's local `typeCheck`-gated `find`/`attr`/`each`
+ * gracefully degrade on malformed input (e.g. `find(123, 456)` returns an empty NodeList - see
+ * dom.spec.ts's "type checking" suite), a defensive behavior jui-core-ts's own dom.ts doesn't
+ * replicate (it would throw instead). Reconciling would need to either weaken this file's
+ * validation or strengthen jui-core-ts's, so it was left local rather than risk silently changing
+ * this project's tested error-handling behavior for the modest gain of de-duplicating ~150 lines.
  */
 
 /**

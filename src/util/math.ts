@@ -10,8 +10,17 @@
 // file ports the FULL original, including the matrix helpers and `resize`/`degree`/`angle`/
 // `interpolateRound`/`round`/`multi`/`remain` that jui-chart-vue never needed.
 //
-// Bugs/quirks preserved byte-faithfully (Phase 0 rule 6) - see this project's PORT_STATUS.md for
-// the full writeup:
+// RECONCILED with jui-core-ts (see this project's PORT_STATUS.md "jui-core-ts reconciliation"
+// entry): functions below verified byte-identical to jui-core-ts's own `src/utils/math.ts` (no
+// preserved-bug divergence) now delegate to it, so there's one shared implementation instead of
+// two hand-maintained copies. `fixed`/`nice`/`matrix`/`matrix3d`/`inverseMatrix3d` stay fully
+// local - jui-core-ts's port of these either fixed the original's bugs outright (jui-core-ts is
+// not bound by this project's Phase 0 rule 6) or uses incompatible types (`matrix3d`'s `Mat4`
+// tuple type vs jui-core-ts's plain `Float32Array[]`), so delegating would silently change this
+// project's actual runtime output and break the PRESERVED BUG tests in math.spec.ts.
+//
+// Bugs/quirks preserved byte-faithfully (Phase 0 rule 6) in the functions that stayed local - see
+// this project's PORT_STATUS.md for the full writeup:
 //  1. `nice(min, max, ticks, true)` (the "isNice"/round-to-1-2-5-10 branch) always throws a
 //     `ReferenceError` at runtime in the original. `niceNum()`'s inner result variable is
 //     assigned via the undeclared identifier `niceFraction` (a typo - a *different*, unused
@@ -46,17 +55,35 @@
 //        through to the `else` branch and every element gets multiplied by `Infinity`, producing
 //        `Infinity`/`NaN` entries instead of the intended identity-matrix fallback.
 
+// math's functions are only namespace-exported from jui-core-ts (it collides with `resize` in
+// jui-core-ts's own dom.ts), so import the namespace rather than flat names.
+import { MathUtil } from 'jui-core-ts'
+const {
+  rotate: coreRotate,
+  resize: coreResize,
+  radian: coreRadian,
+  degree: coreDegree,
+  angle: coreAngle,
+  interpolateNumber: coreInterpolateNumber,
+  interpolateRound: coreInterpolateRound,
+  getFixed: coreGetFixed,
+  round: coreRound,
+  plus: corePlus,
+  minus: coreMinus,
+  multi: coreMulti,
+  div: coreDiv,
+  remain: coreRemain,
+  scaleValue: coreScaleValue,
+} = MathUtil
+
 export interface Point2D {
   x: number
   y: number
 }
 
 /** Rotates point (x, y) by `radian` around the origin. */
-export function rotate(x: number, y: number, radian: number): Point2D {
-  return {
-    x: x * Math.cos(radian) - y * Math.sin(radian),
-    y: x * Math.sin(radian) + y * Math.cos(radian),
-  }
+export function rotate(x: number, y: number, radianValue: number): Point2D {
+  return coreRotate(x, y, radianValue)
 }
 
 export interface ResizedBox {
@@ -66,57 +93,37 @@ export interface ResizedBox {
 
 /** Scales (objectWidth, objectHeight) down/up to fit within (maxWidth, maxHeight), keeping ratio. */
 export function resize(maxWidth: number, maxHeight: number, objectWidth: number, objectHeight: number): ResizedBox {
-  const ratio = objectHeight / objectWidth
-
-  if (objectWidth >= maxWidth && ratio <= 1) {
-    objectWidth = maxWidth
-    objectHeight = maxHeight * ratio
-  } else if (objectHeight >= maxHeight) {
-    objectHeight = maxHeight
-    objectWidth = maxWidth / ratio
-  }
-
-  return { width: objectWidth, height: objectHeight }
+  return coreResize(maxWidth, maxHeight, objectWidth, objectHeight)
 }
 
 /** Converts degrees to radians. */
 export function radian(degree: number): number {
-  return (degree * Math.PI) / 180
+  return coreRadian(degree)
 }
 
 /** Converts radians to degrees. */
 export function degree(radianValue: number): number {
-  return (radianValue * 180) / Math.PI
+  return coreDegree(radianValue)
 }
 
 /** Angle (radians) of the vector from (x1,y1) to (x2,y2), via `Math.atan2`. */
 export function angle(x1: number, y1: number, x2: number, y2: number): number {
-  const dx = x2 - x1
-  const dy = y2 - y1
-  return Math.atan2(dy, dx)
+  return coreAngle(x1, y1, x2, y2)
 }
 
 /** Builds a linear-interpolation callback between `a` and `b` (t in [0,1], unrounded). */
 export function interpolateNumber(a: number, b: number): (t: number) => number {
-  const dist = b - a
-  return (t: number) => a + dist * t
+  return coreInterpolateNumber(a, b)
 }
 
 /** Same as `interpolateNumber`, rounded to the nearest integer. */
 export function interpolateRound(a: number, b: number): (t: number) => number {
-  const dist = b - a
-  return (t: number) => Math.round(a + dist * t)
+  return coreInterpolateRound(a, b)
 }
 
 /** Number of decimal places needed to represent `a` or `b` exactly, whichever needs more. */
 export function getFixed(a: number | string, b: number | string): number {
-  const aArr = `${a}`.split('.')
-  const aLen = aArr.length < 2 ? 0 : aArr[1].length
-
-  const bArr = `${b}`.split('.')
-  const bLen = bArr.length < 2 ? 0 : bArr[1].length
-
-  return aLen > bLen ? aLen : bLen
+  return coreGetFixed(a, b)
 }
 
 export interface FixedMath {
@@ -158,36 +165,28 @@ export function fixed(fixedValue: number): FixedMath {
 
 /** Rounds `num` to `fixedPlaces` decimal places. */
 export function round(num: number, fixedPlaces: number): number {
-  const fixedNumber = Math.pow(10, fixedPlaces)
-  return Math.round(num * fixedNumber) / fixedNumber
+  return coreRound(num, fixedPlaces)
 }
 
 export function plus(a: number, b: number): number {
-  const pow = Math.pow(10, getFixed(a, b))
-  return Math.round(a * pow + b * pow) / pow
+  return corePlus(a, b)
 }
 
 export function minus(a: number, b: number): number {
-  const pow = Math.pow(10, getFixed(a, b))
-  return Math.round(a * pow - b * pow) / pow
+  return coreMinus(a, b)
 }
 
 export function multi(a: number, b: number): number {
-  const pow = Math.pow(10, getFixed(a, b))
-  return Math.round(a * pow * (b * pow)) / (pow * pow)
+  return coreMulti(a, b)
 }
 
 /** Decimal-safe division: `a / b`, re-rounded to the decimal precision of the raw result. */
 export function div(a: number, b: number): number {
-  const pow = Math.pow(10, getFixed(a, b))
-  const result = (a * pow) / (b * pow)
-  const pow2 = Math.pow(10, getFixed(result, 0))
-  return Math.round(result * pow2) / pow2
+  return coreDiv(a, b)
 }
 
 export function remain(a: number, b: number): number {
-  const pow = Math.pow(10, getFixed(a, b))
-  return Math.round((a * pow) % (b * pow)) / pow
+  return coreRemain(a, b)
 }
 
 export interface NiceResult {
@@ -418,8 +417,5 @@ export function inverseMatrix3d(me: Vec4[]): Mat4 {
  * obviously "correct" in general, just preserved).
  */
 export function scaleValue(value: number, minValue: number, maxValue: number, minScale: number, maxScale: number): number {
-  const _minValue = minValue === maxValue ? 0 : minValue
-  const range = maxScale - minScale
-  const per = (value - _minValue) / (maxValue - _minValue)
-  return range * per + minScale
+  return coreScaleValue(value, minValue, maxValue, minScale, maxScale)
 }
