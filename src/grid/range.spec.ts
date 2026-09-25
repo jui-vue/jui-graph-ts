@@ -251,13 +251,17 @@ describe('RangeGrid', () => {
     },
   )
 
-  describe('the reachable math.ts nice() ReferenceError (via linear().ticks(step, true))', () => {
-    it('drawBefore() throws when grid.nice is true - a real, reachable crash in the original engine too', () => {
+  describe('grid.nice: true (via linear().ticks(step, true))', () => {
+    it('CORRECTION: drawBefore() does NOT throw when grid.nice is true - math.ts\'s nice() genuinely works, matching the real engine', () => {
+      // Previously asserted as "a real, reachable crash in the original engine too" - that was
+      // wrong (see math.ts's header comment for the full correction). Confirmed by loading a real
+      // `nice: true` range-grid demo directly against the live legacy site (no error).
       const g = makeRangeGrid()
       g.axis = makeAxisStub({ area: { x: 0, y: 0, x2: 400, y2: 300, width: 400, height: 300 } })
       g.grid = makeGrid({ domain: [0, 10], step: 10, nice: true }) as any
 
-      expect(() => g.drawBefore()).toThrow(/niceFraction is not defined/)
+      expect(() => g.drawBefore()).not.toThrow()
+      expect(g.ticks).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
     })
   })
 

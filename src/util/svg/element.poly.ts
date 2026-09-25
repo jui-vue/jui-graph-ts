@@ -2,6 +2,7 @@
 // Extends `element.transform.ts`'s `TransElement` with a `<polyline>`/`<polygon>` point-list builder.
 
 import { TransElement } from "./element.transform";
+import { registerElementModule } from "./element";
 
 export class PolyElement extends TransElement {
   private orders: string[] = [];
@@ -26,3 +27,6 @@ export class PolyElement extends TransElement {
     }
   }
 }
+
+// See `Element.is()`'s doc comment in `element.ts`.
+registerElementModule("util.svg.element.poly", PolyElement);

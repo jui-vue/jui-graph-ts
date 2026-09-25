@@ -1,7 +1,7 @@
 // Port of juijs-graph's `src/util/svg/element.transform.js` ("util.svg.element.transform").
 // Extends `element.ts`'s `Element` with an SVG `transform="..."` attribute builder.
 
-import { Element } from "./element";
+import { Element, registerElementModule } from "./element";
 
 type TransformKey = "translate" | "scale" | "rotate" | "skew" | "matrix";
 
@@ -110,3 +110,6 @@ export class TransElement extends Element {
     return null;
   }
 }
+
+// See `Element.is()`'s doc comment in `element.ts`.
+registerElementModule("util.svg.element.transform", TransElement);

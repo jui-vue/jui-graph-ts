@@ -179,9 +179,12 @@ export class CanvasBase {
    * `ReferenceError: drawFreeRect is not defined` before it draws anything - confirmed by literal
    * transcription, not merely inferred from reading the code once (even setting that aside, the
    * call also passes an extra leading `context` argument `drawFreeRect`'s real 10-parameter
-   * signature doesn't have, so it would be mis-shifted even if the reference did resolve). Same
-   * discipline as `math.ts`'s `niceFraction` and `element.ts`'s `is()`: reproduced as a literal
-   * throw rather than silently wired up to call `this.drawFreeRect(...)` correctly.
+   * signature doesn't have, so it would be mis-shifted even if the reference did resolve).
+   * Reading a truly undeclared identifier throws on read in BOTH strict and sloppy mode - a
+   * different, still-valid category from `math.ts`'s `niceNum()` and `element.ts`'s `is()`, both
+   * of which were previously mis-diagnosed as this kind of bug and have since been corrected (see
+   * each file's own header comment) - reproduced here as a literal throw rather than silently
+   * wired up to call `this.drawFreeRect(...)` correctly.
    */
   drawPage(_value: number, _x1: number, _y1: number, _color?: string, _border = false): void {
     throw new ReferenceError("drawFreeRect is not defined");

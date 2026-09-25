@@ -43,8 +43,11 @@
 //     the call itself - reading the FIRST argument (`chart`) throws `ReferenceError: chart is not
 //     defined` immediately (Node-verified), so `this.drawGrid(...)` is never even invoked. Every
 //     real `RuleGrid.draw()` call crashes, unconditionally, in the real upstream engine - not a
-//     port-introduced restriction. Reproduced literally (same convention as `math.ts`'s
-//     `niceFraction`/`util/svg/element.ts`'s `is()`/`util/canvas/base.ts`'s `drawFreeRect` bugs),
+//     port-introduced restriction. Reproduced literally (same "preserve a genuinely-reachable
+//     upstream crash rather than silently drop it" discipline `util/canvas/base.ts`'s
+//     `drawFreeRect` bug still follows - NOT the same category as `math.ts`'s `niceNum()`/
+//     `util/svg/element.ts`'s `is()`, which were both previously MIS-diagnosed as this kind of
+//     always-throwing bug and have since been corrected - see each file's own header comment),
 //     not "fixed" by silently dropping the dead identifiers the way every other concrete grid's
 //     harmless dead-STRING-argument case (`this.drawGrid("block")` etc, which `drawGrid()` itself
 //     was ALREADY discarding) was adapted.
@@ -590,9 +593,13 @@ export class RuleGrid extends CoreGrid {
     // `this.drawGrid(chart, orient, "rule", grid)` reads three bare, never-declared identifiers
     // as call arguments - argument evaluation happens before the call, so reading the FIRST one
     // (`chart`) throws immediately. `this.drawGrid`/`top`/`bottom`/`left`/`right` are never
-    // reached via a real `draw()` call, in the original engine, always. Reproduced literally
-    // (same convention as `math.ts`'s `niceFraction`), not adapted away the way every other
-    // concrete grid's harmless dead-STRING-argument case was.
+    // reached via a real `draw()` call, in the original engine, always. Genuinely different in
+    // kind from `math.ts`'s (corrected, no-longer-throwing) `niceNum()` bug: this reads bare
+    // identifiers that were NEVER DECLARED anywhere in the file at all, which throws
+    // `ReferenceError` on read in BOTH strict and sloppy mode (unlike an undeclared-assignment
+    // typo, which only throws in strict mode - see `math.ts`'s header comment) - reproduced
+    // literally, not adapted away the way every other concrete grid's harmless dead-STRING-
+    // argument case was.
     throw new ReferenceError("chart is not defined");
   };
 

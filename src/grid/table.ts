@@ -106,10 +106,12 @@ export class TableGrid extends CoreGrid {
    * Doubly (arguably triply) unreachable, independent of the above: (a) the original `table.js`
    * never declares `var _ = jui.include("util.base");` at all (unlike `grid/panel.ts`'s/
    * `grid/overlap.ts`'s originals, which both do) - so its `_.extend(...)` call would throw
-   * `ReferenceError: _ is not defined` if this line were ever actually reached (same discipline
-   * `util/math.ts`'s `niceFraction`/`util/svg/element.ts`'s `is()` already established for a
-   * genuinely-unreachable upstream reference error - not reproduced as a literal throw here since
-   * there's no reachable call site to attach it to, the loop above already never runs); (b) even
+   * `ReferenceError: _ is not defined` if this line were ever actually reached (reading a truly
+   * undeclared identifier, which throws on read regardless of strict/sloppy mode - a different,
+   * still-valid category from `util/math.ts`'s `niceNum()`/`util/svg/element.ts`'s `is()`, both of
+   * which were previously mis-diagnosed as this kind of bug and have since been corrected, see
+   * each file's own header comment - not reproduced as a literal throw here since there's no
+   * reachable call site to attach it to, the loop above already never runs); (b) even
    * setting both of those aside, the created rect (`var rect = this.chart.svg.rect(...)`) is never
    * appended anywhere - the original's own `g.append(rect);` line is literally commented out
    * (`//g.append(rect);`) - and its `fill` value is typo'd (`"tranparent"`, missing an `s`).

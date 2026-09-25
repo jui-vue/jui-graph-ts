@@ -223,10 +223,17 @@ describe("Element", () => {
     });
 
     describe("is()", () => {
-        it("preserved bug: always throws ReferenceError (references a never-imported `jui` global)", () => {
+        it("CORRECTION: does NOT throw - resolves via the real engine's module-registry instanceof check", () => {
+            // Previously asserted as a "preserved bug: always throws ReferenceError" - that was
+            // wrong. The real engine's own `is()` does `return this instanceof jui.include(moduleId)`,
+            // a genuinely working registry lookup (`jui` is the real, always-present module
+            // registry singleton, not an undefined global) - confirmed by loading real
+            // `animate: true` demos directly against the live legacy site (no error). See
+            // `is()`'s own doc comment.
             const el = makeElement("rect");
-            expect(() => el.is("util.svg.element")).toThrow(ReferenceError);
-            expect(() => el.is("util.svg.element")).toThrow("jui is not defined");
+            expect(el.is("util.svg.element")).toBe(true);
+            expect(el.is("util.svg.element.path")).toBe(false);
+            expect(el.is("util.svg.element.nonexistent")).toBe(false);
         });
     });
 });

@@ -2,6 +2,7 @@
 // Extends `element.transform.ts`'s `TransElement` with an SVG `<path d="...">` command builder.
 
 import { TransElement } from "./element.transform";
+import { registerElementModule } from "./element";
 
 /**
  * Inlined from `util/base.js`'s `createId()` (the registry singleton this project doesn't port -
@@ -154,3 +155,6 @@ export class PathElement extends TransElement {
     return length;
   }
 }
+
+// See `Element.is()`'s doc comment in `element.ts`.
+registerElementModule("util.svg.element.path", PathElement);

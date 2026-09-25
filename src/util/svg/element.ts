@@ -20,9 +20,9 @@
 // but the `{type, callback}` list used by `.off()` to find/remove them is shared and cross-
 // contaminated). This is an artifact of the OLD prototype-seeding registry mechanism Phase 0
 // rules 1/2/4 already authorize dropping outright (same category as `util/base.js`'s `inherit()`/
-// `typeCheck()` machinery) - it is not "real product logic" the way e.g. `math.ts`'s
-// `niceFraction` ReferenceError or `color.ts`'s `parseStop()` bug are (both self-contained within
-// a single function, independent of the module system). A real ES `class Foo extends Bar`, which
+// `typeCheck()` machinery) - it is not "real product logic" the way e.g. `math.ts`'s `niceNum()`
+// 1/2/5/10-rounding logic or `color.ts`'s `parseStop()` bug are (both self-contained within a
+// single function, independent of the module system). A real ES `class Foo extends Bar`, which
 // Phase 0 rule 2 explicitly directs this port to use, does not have this bug by construction -
 // every instance gets its own fully-initialized copy of inherited private state. Not preserved;
 // documented here rather than silently deviating, per Phase 0's own instruction.
@@ -335,14 +335,41 @@ export class Element {
   }
 
   /**
-   * **Preserved bug**: the original references a bare, never-imported `jui` global (the
-   * registry singleton - `element.js` imports nothing at all) - calling `.is(...)` always threw
-   * `ReferenceError: jui is not defined` in the real upstream library, independent of any
-   * module-system change this port makes elsewhere. Same discipline as `math.ts`'s
-   * `niceFraction` ReferenceError: reproduced as a literal throw rather than silently dropped
-   * or "fixed" by wiring up a real registry lookup.
+   * CORRECTION (this was previously mis-diagnosed as a preserved "always throws" bug - it is
+   * NOT one): the real engine's own `util.svg.element.js` defines `this.is = function(moduleId) {
+   * return this instanceof jui.include(moduleId); }` (confirmed directly against
+   * `www.jui-vue.io/lib/jui/js/core.js`, the real uncompressed legacy bundle this whole port
+   * cross-checks against). `jui` here is NOT "a bare, never-imported global" - it's the real
+   * module-registry singleton every `jui.define(...)`-wrapped file in the actual distributed
+   * engine runs under (attached to `window.jui`, always present at runtime) - `jui.include(
+   * moduleId)` legitimately resolves the registered constructor for `moduleId` and this genuinely
+   * works, confirmed by loading real `animate: true` demos (`overlap_bar`/`active_bar`/
+   * `overlap_column`/`active_column`/`dashboard4`) directly against the live legacy site: none of
+   * them throw or log any error. Reproduced here via `elementModuleRegistry` below - this port has
+   * no dynamic module registry (Phase 0 rule 4 drops that machinery deliberately), so each
+   * concrete `Element` subclass file self-registers its own real ES class under its own moduleId
+   * at import time instead (`registerElementModule()`), and `is()` does the equivalent `this
+   * instanceof ctor` check against whatever's registered.
    */
-  is(_moduleId: string): boolean {
-    throw new ReferenceError("jui is not defined");
+  is(moduleId: string): boolean {
+    const ctor = elementModuleRegistry[moduleId];
+    return ctor != null && this instanceof ctor;
   }
 }
+
+/**
+ * Backs `Element.is()` above - see its doc comment. Keyed by the same dotted moduleId strings the
+ * real engine's `jui.define(moduleId, ...)` calls use (`"util.svg.element.transform"` etc.).
+ * Populated by each concrete subclass FILE itself (`registerElementModule()`, called at module
+ * scope in `element.transform.ts`/`element.path.ts`/`element.poly.ts`/`element.path.rect.ts`/
+ * `element.path.symbol.ts`) rather than imported directly here, which would create an import
+ * cycle (those files already import `Element` FROM this file).
+ */
+const elementModuleRegistry: Record<string, abstract new (...args: never[]) => unknown> = {};
+
+/** See `elementModuleRegistry`'s own doc comment. */
+export function registerElementModule(moduleId: string, ctor: abstract new (...args: never[]) => unknown): void {
+  elementModuleRegistry[moduleId] = ctor;
+}
+
+registerElementModule("util.svg.element", Element);

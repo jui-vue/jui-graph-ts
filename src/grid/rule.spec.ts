@@ -308,15 +308,15 @@ describe("RuleGrid", () => {
     });
   });
 
-  describe("drawBefore - reachable util/math.ts nice() ReferenceError, same as RangeGrid", () => {
-    it("throws when grid.nice is true (routed via an explicit array domain to avoid the separate bare-grid bug)", () => {
-      const { g } = makeRuleGrid({ domain: [0, 100] as any, step: 10, nice: true });
-      // domain is not string/function -> hits the bare `grid` ReferenceError FIRST (bug 2), so
-      // this specific config can't reach the nice() bug - use a string domain instead to route
-      // around bug 2 and actually exercise drawBefore()'s ticks(step, nice) call.
+  describe("drawBefore - grid.nice: true, same as RangeGrid", () => {
+    it("CORRECTION: does NOT throw - math.ts's nice() genuinely works, matching the real engine", () => {
+      // Previously asserted as "throws when grid.nice is true" (a supposed reachable
+      // util/math.ts nice() ReferenceError) - that was wrong, see math.ts's header comment for
+      // the full correction. Confirmed by loading a real `nice: true` log-grid demo
+      // (`grid_block_log`) directly against the live legacy site (no error).
       const { g: g2 } = makeRuleGrid({ domain: "f", step: 10, nice: true }, { data: [{ f: 0 }, { f: 100 }] });
-      expect(() => g2.drawBefore()).toThrow(/niceFraction is not defined/);
-      void g;
+      expect(() => g2.drawBefore()).not.toThrow();
+      expect(g2.ticks).toEqual([0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100]);
     });
   });
 

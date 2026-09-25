@@ -139,13 +139,17 @@ describe('nice', () => {
     expect(nice(10, 0, 5)).toEqual({ min: 0, max: 10, range: 10, spacing: 2 })
   })
 
-  it('PRESERVED BUG: isNice=true always throws ReferenceError("niceFraction is not defined")', () => {
-    // Confirmed against the real upstream source: `niceNum()`'s result variable is assigned via
-    // an undeclared identifier (a typo for a separately-declared-but-unused `nickFraction`), which
-    // throws in the original's own ES-module/strict-mode context too - not something introduced
-    // by this TS port. See math.ts's header comment.
-    expect(() => nice(0, 97, 5, true)).toThrow(ReferenceError)
-    expect(() => nice(0, 97, 5, true)).toThrow('niceFraction is not defined')
+  it('CORRECTION: isNice=true does NOT throw - rounds range/spacing to a 1/2/5/10*10^n step', () => {
+    // Previously asserted as a "PRESERVED BUG: always throws ReferenceError" - that was wrong.
+    // `niceNum()`'s result variable IS assigned via an undeclared identifier in the real upstream
+    // source (a typo for a separately-declared-but-unused `nickFraction`), but the real,
+    // distributed engine (`www.jui-vue.io/lib/jui/js/core.js`) is a non-strict, non-module script
+    // - the undeclared assignment silently creates an implicit global rather than throwing, and
+    // the function returns the correct rounded value regardless. Confirmed by loading real
+    // `nice: true` demos directly against the live legacy site (no error, correct rendering). See
+    // math.ts's header comment.
+    expect(nice(0, 97, 5, true)).toEqual({ min: 0, max: 80, range: 100, spacing: 20 })
+    expect(nice(1, 100, 10, true)).toEqual({ min: 0, max: 100, range: 100, spacing: 10 })
   })
 })
 

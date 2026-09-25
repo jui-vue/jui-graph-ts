@@ -151,19 +151,20 @@ needed). Cross-checked against `jui-chart-vue/src/composables/mathUtil.ts` + its
 already-hand-traced values exactly (reused several of its expected values directly, e.g.
 `plus(0.1,0.2)===0.3`). Quirks/bugs found and preserved byte-faithfully (Node-cross-checked against
 literal transcriptions of the real upstream source, not just read-and-assumed):
-  - **`nice(min, max, ticks, true)` (the `isNice` branch) always throws `ReferenceError:
-    niceFraction is not defined`, in every distributed form of the real library** — not a
-    port-introduced issue. `niceNum()`'s result variable is assigned via the undeclared
-    identifier `niceFraction` (a typo — a *different*, unused `nickFraction` is the one actually
-    `var`-declared). Confirmed empirically: `dist/jui-graph.js`/`.cjs.js`/`.esm.js` all start with
-    `'use strict'` (real ES-module output), and a literal Node transcription of `niceNum()` throws
-    exactly this error. **This is reachable in real usage, not just dead code**: `grid/range.js`
-    (Phase C) threads its own `nice` grid-config option straight into this call as `isNice` — so
-    any consumer that sets `nice: true` on a range grid gets a hard crash in the original engine.
-    jui-chart-vue's `mathUtil.ts` silently "fixed" this by necessity (TypeScript requires
-    declaring `niceFraction`, so its port can't reproduce an implicit-global ReferenceError) — this
-    port instead makes `niceNum()` literally `throw new ReferenceError('niceFraction is not
-    defined')`, preserving the exact crash/type/message. Tested in `math.spec.ts`.
+  - **CORRECTED (was previously documented here as "always throws `ReferenceError: niceFraction is
+    not defined`, in every distributed form of the real library" — that was wrong)**: `niceNum()`'s
+    result variable IS assigned via the undeclared identifier `niceFraction` (a genuine typo — a
+    *different*, unused `nickFraction` is the one actually `var`-declared), but the REAL engine
+    this project targets (`www.jui-vue.io/lib/jui/js/core.js`, the actual uncompressed legacy
+    bundle real demo pages load — not the separate, never-actually-deployed-by-the-real-site
+    `juijs-graph` npm package's own ES-module `dist/*.js` build, which the original diagnosis used
+    as its cross-check target) is a classic `jui.define(...)`-wrapped script with no `"use strict"`
+    anywhere, running in ordinary sloppy mode — assigning to an undeclared identifier there
+    silently creates an implicit global and execution continues normally, returning the intended
+    1/2/5/10-rounded value. Confirmed by loading real `nice: true` demos (`grid_block_log`, whose
+    log-axis grid reaches this exact path) directly against the live legacy site: no error, correct
+    rendering. `niceNum()` is now ported as the real, non-throwing rounding algorithm. Tested in
+    `math.spec.ts`.
   - **`fixed(x).div(a, b)` throws `TypeError` at runtime** — `.div` calls `this.getFixed(...)`,
     assuming `this` is the top-level `util.math` namespace (true for the standalone `math.div()`,
     which also calls `this.getFixed` and works fine), but `this` is actually the `fixed()`
@@ -387,10 +388,14 @@ call site, Node/hand-verified, not merely inferred from a single read)**:
     it without adjusting the loop index — only every other pre-existing child node actually gets
     removed when there are 2+. Harmless in the overwhelmingly common case (a freshly-created
     element with 0 existing children). Tested.
-  - `element.ts`'s `is()`: references a bare, never-imported `jui` registry global — always threw
-    `ReferenceError: jui is not defined` in the real upstream library, independent of any module
-    system this port makes elsewhere. Same discipline as `math.ts`'s `niceFraction`: reproduced as
-    a literal throw. Tested.
+  - `element.ts`'s `is()`: CORRECTED (was previously documented here as "references a bare,
+    never-imported `jui` registry global — always threw `ReferenceError: jui is not defined`" —
+    that was wrong). The real engine's own `is()` does `return this instanceof
+    jui.include(moduleId)` (confirmed against `www.jui-vue.io/lib/jui/js/core.js`) — `jui` is the
+    real, always-present module-registry singleton, not an undefined global, and this genuinely
+    resolves. Confirmed by loading real `animate: true` demos directly against the live legacy
+    site: no error. Now ported as a real registry-backed `instanceof` check (`elementModuleRegistry`,
+    populated by each concrete `Element` subclass file at import time). Tested.
   - `element.ts`'s `attr(key)` getter: returns the raw stored value from the internal
     `.attributes` cache (whatever type was originally passed — e.g. a `number`) when truthy,
     falling back to `element.getAttribute()` (always a `string`) only when the cached value is

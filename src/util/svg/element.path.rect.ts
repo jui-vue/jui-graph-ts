@@ -2,6 +2,7 @@
 // Extends `element.path.ts`'s `PathElement` with a single rounded-rectangle path builder.
 
 import { PathElement } from "./element.path";
+import { registerElementModule } from "./element";
 
 export class PathRectElement extends PathElement {
   /**
@@ -27,3 +28,6 @@ export class PathRectElement extends PathElement {
       .join();
   }
 }
+
+// See `Element.is()`'s doc comment in `element.ts`.
+registerElementModule("util.svg.element.path.rect", PathRectElement);

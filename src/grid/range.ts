@@ -28,15 +28,19 @@
 // `drawBefore()` concern, confirmed by direct reading, no discrepancy found.
 //
 // ============================================================================================
-// `util/math.ts`'s documented `nice()` `ReferenceError` - reachable from here directly
+// `util/math.ts`'s `nice()` - reachable from here directly (CORRECTED, see math.ts's own header)
 // ============================================================================================
 // `drawBefore()` below does `this.ticks = this.scale.ticks(this.step, this.nice)`, where
 // `this.nice = this.grid.nice` (a real, user-settable `@cfg`, default `false`). `util/scale.ts`'s
-// `linear().ticks(count, isNice)` calls `math.ts`'s `nice(min, max, ticks, isNice)`, which THROWS
-// `ReferenceError: niceFraction is not defined` whenever `isNice` is truthy (see `math.ts`'s own
-// header comment/PORT_STATUS.md - a real, upstream-original bug, not port-introduced). So: any
-// real `RangeGrid` configured with `nice: true` crashes hard in `drawBefore()`, in both the
-// original engine and this port. Tested below (`drawBefore()` with `nice: true` throws).
+// `linear().ticks(count, isNice)` calls `math.ts`'s `nice(min, max, ticks, isNice)`, which
+// genuinely computes a real 1/2/5/10-rounded tick range/spacing whenever `isNice` is truthy - a
+// previous pass here mis-diagnosed this as always throwing `ReferenceError: niceFraction is not
+// defined` (see `math.ts`'s own header comment for the full correction, including why loading
+// this file's own real `nice: true` demos - e.g. `grid_block_log`'s log-grid, which reaches this
+// same code path via `LogGrid extends RangeGrid` - directly against the live legacy site never
+// throws). So: any real `RangeGrid`/`LogGrid` configured with `nice: true` renders correctly, in
+// both the original engine and this port. Tested below (`drawBefore()` with `nice: true` does not
+// throw and produces the expected ticks).
 //
 // ============================================================================================
 // Preserved bugs/quirks found and documented (Node/hand-verified against the literal original,

@@ -21,17 +21,28 @@
 //
 // Bugs/quirks preserved byte-faithfully (Phase 0 rule 6) in the functions that stayed local - see
 // this project's PORT_STATUS.md for the full writeup:
-//  1. `nice(min, max, ticks, true)` (the "isNice"/round-to-1-2-5-10 branch) always throws a
-//     `ReferenceError` at runtime in the original. `niceNum()`'s inner result variable is
-//     assigned via the undeclared identifier `niceFraction` (a typo - a *different*, unused
-//     variable `nickFraction` is the one actually declared with `var`). Because the original file
-//     is an ES module (`import`/`export`), it runs in strict mode in every distributed form of
-//     the library (confirmed: `dist/jui-graph.cjs.js`/`.esm.js`/`.js` all start with
-//     `'use strict'`), so assigning to an undeclared identifier throws rather than silently
-//     creating a global. This is reachable in practice, not just theoretical dead code: grid/
-//     range.js's `nice` grid option is threaded straight into this call as `isNice`, so any
-//     consumer that configures `nice: true` on a range grid gets a hard crash. Preserved here by
-//     literally throwing the same `ReferenceError` with the same message.
+//  1. CORRECTION (this was previously mis-diagnosed as a preserved "always throws" bug - it is
+//     NOT one, see below): `niceNum()`'s inner result variable IS assigned via the undeclared
+//     identifier `niceFraction` (a genuine typo in the original - a *different*, unused variable
+//     `nickFraction` is the one actually declared with `var`). But the REAL, distributed engine
+//     this project targets (`www.jui-vue.io/lib/jui/js/core.js`, the same uncompressed legacy
+//     bundle this whole port cross-checks against elsewhere - e.g. `chartMap.ts`'s "site diverges
+//     from the raw npm package" precedent) is a classic `jui.define(...)`-wrapped script, NOT an
+//     ES module - it has no `"use strict"` directive anywhere (confirmed by inspection) and runs
+//     in ordinary sloppy mode. In sloppy mode, assigning to an undeclared identifier does NOT
+//     throw - it silently creates an implicit global (`window.niceFraction`) and execution
+//     continues normally, with the correct value already sitting in that identifier by the time
+//     `return niceFraction * Math.pow(10, exponent)` reads it back. Net effect: the real engine's
+//     `niceNum()` runs to completion and returns the intended 1/2/5/10-rounded value every time -
+//     no crash, ever, confirmed by loading real `nice:true` demos (`grid_block_log`, plus
+//     `overlap_bar`/`active_bar`/`overlap_column`/`active_column`/`dashboard4` for quirk-1-style
+//     `Element.is()` below) directly against the live legacy site. The earlier "always throws"
+//     diagnosis assumed the separate, ES-module `juijs-graph` npm package's own strict-mode
+//     `dist/*.js` bundles were the right cross-check target - they're a different, never-actually-
+//     deployed-by-the-real-site build, same distinction `chartMap.ts` already draws for `chart.map`
+//     - not the real target here. Ported below as the straightforward, non-throwing 1/2/5/10
+//     rounding algorithm (functionally identical to what the implicit-global version actually
+//     computes), not as a literal throw.
 //  2. `fixed(x).div(a, b)` throws a `TypeError` at runtime (`this.getFixed` is not a function).
 //     `.div` was written assuming `this` is the top-level `util.math` namespace object (true for
 //     the standalone `math.div()`, which also calls `this.getFixed`), but `this` is actually the
@@ -196,16 +207,34 @@ export interface NiceResult {
   spacing: number
 }
 
-function niceNum(_range: number, _round: boolean): number {
-  // Preserved bug (quirk 1 above): always throws. `_range`/`_round` intentionally unused - the
-  // original never reaches its own body logic either.
-  throw new ReferenceError('niceFraction is not defined')
+/**
+ * Rounds `range` to a "nice" 1/2/5/10 * 10^exponent step - see quirk 1 in this file's header
+ * comment for why this is a real (non-throwing) implementation rather than a preserved
+ * `ReferenceError`, despite the original source's own `niceFraction`/`nickFraction` typo.
+ */
+function niceNum(range: number, round: boolean): number {
+  const exponent = Math.floor(Math.log(range) / Math.LN10)
+  const fraction = range / Math.pow(10, exponent)
+  let niceFraction: number
+
+  if (round) {
+    if (fraction < 1.5) niceFraction = 1
+    else if (fraction < 3) niceFraction = 2
+    else if (fraction < 7) niceFraction = 5
+    else niceFraction = 10
+  } else {
+    if (fraction <= 1) niceFraction = 1
+    else if (fraction <= 2) niceFraction = 2
+    else if (fraction <= 5) niceFraction = 5
+    else niceFraction = 10
+  }
+
+  return niceFraction * Math.pow(10, exponent)
 }
 
 /**
  * Computes a "nice" tick range/spacing for [min, max] split into roughly `ticks` steps.
- * `isNice: true` rounds the spacing to a 1/2/5/10 * 10^n step instead of dividing evenly - but
- * see quirk 1 above: that branch always throws in the original, preserved here.
+ * `isNice: true` rounds the spacing to a 1/2/5/10 * 10^n step instead of dividing evenly.
  */
 export function nice(min: number, max: number, ticks: number, isNice = false): NiceResult {
   const _min = min > max ? max : min

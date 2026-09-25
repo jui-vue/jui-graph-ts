@@ -2,6 +2,7 @@
 // Extends `element.path.ts`'s `PathElement` with small marker-symbol path helpers.
 
 import { PathElement } from "./element.path";
+import { registerElementModule } from "./element";
 
 export interface SymbolTemplates {
   triangle: string;
@@ -91,3 +92,6 @@ export class PathSymbolElement extends PathElement {
     return this.MoveTo(cx, cy).moveTo(-r, 0).arc(r / 2, r / 2, 0, 1, 1, r, 0).arc(r / 2, r / 2, 0, 1, 1, -r, 0);
   }
 }
+
+// See `Element.is()`'s doc comment in `element.ts`.
+registerElementModule("util.svg.element.path.symbol", PathSymbolElement);
