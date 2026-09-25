@@ -407,7 +407,56 @@ export class Axis {
   page = 1;
   start = 0;
   end = 0;
-  degree: { x: number; y: number; z: number } = { x: 0, y: 0, z: 0 };
+  // GENUINE PORT REGRESSION, found and fixed (not a preserved upstream bug - see below for the
+  // full writeup): `degree` must NOT have an eager object-literal initializer like every other
+  // field on this line, even though its declared TYPE is the same `{x,y,z}` shape `plane.ts`'s
+  // own `this.baseAxis.degree.x = 0` etc. needs to keep compiling. The real engine's own
+  // closure-based `Axis` constructor (`var Axis = function(chart, originAxis, cloneAxis) { var
+  // self = this; ... }`, confirmed by reading the whole constructor body in
+  // `www.jui-vue.io/lib/jui/js/chart.js`) never assigns `self.degree` to ANYTHING before `init()`
+  // runs - `self.degree` is genuinely `undefined` at that point. `init()`'s own `_.extend(self, {
+  // degree: cloneAxis.degree, ... })` (real engine AND this port, byte-identical `extend()`
+  // implementations - see `util/base.js`'s `isRecursive()`/`extend()`) only takes the "recurse
+  // into the existing object" branch when `isRecursive(origin[key])` - i.e. when `self.degree` is
+  // ALREADY an object at the time of that call. Since it's `undefined` there in the real engine,
+  // `isRecursive(undefined)` is `false`, so `self.degree = cloneAxis.degree` is a plain, DIRECT
+  // assignment - works correctly for a real, standard-schema numeric `degree` config (e.g. the
+  // `bar3d`/`column3d`/`cylinder3d`/`bubble3d` demo family's own top-level `degree: 30`), not just
+  // the `{x,y,z}` object shape.
+  //
+  // This TS port previously declared `degree: {...} = { x: 0, y: 0, z: 0 }` - a real object,
+  // eagerly assigned at construction, BEFORE `init()`'s own `extend()` call ever runs. That makes
+  // `isRecursive(this.degree)` TRUE at that point (it's already a real object), so `extend()`
+  // recurses INTO it instead of assigning directly: `extend(this.degree, cloneAxis.degree=30,
+  // skip)` - and since `30` fails `typeCheck(["object","function"], 30)`, that recursive call
+  // returns its target UNCHANGED, silently discarding the real `30` - `this.degree` stays `{x:0,
+  // y:0,z:0}` forever after `init()`. `reload()`'s own tail (`this.degree = options.degree`, a
+  // plain assignment, not `extend()`) DOES later correctly set it to `30` - but only AFTER `x`/
+  // `y`/`z`/`c` have ALREADY drawn using the wrong, still-default `degree` earlier in that SAME
+  // `reload()` call (see `reload()`'s own body: grids draw at lines ~847-851, `this.degree`/
+  // `this.depth` aren't assigned until line ~859-860) - poisoning `CoreGrid.getGridSize()`'s
+  // `depth > 0` branch (`radian(360 - degree)` where `degree` is still the stale `{x,y,z}` object
+  // -> `NaN`) for any 2D (non-full-3D) grid sharing this axis with a `grid3d`/`c`-axis sibling -
+  // this is what was producing the real, previously-unexplained NaN `d`/`transform` SVG attributes
+  // across the entire `bar3d`/`column3d`/`cylinder3d`/`bubble3d`/cluster/stack/fullstack family
+  // (13 real-site demos), traced via direct Playwright + instrumented-build debugging, NOT
+  // inferred from a single read.
+  //
+  // Fix: drop the eager initializer (definite-assignment `!`, same "populated later externally"
+  // idiom this file's own `root: TransElement | undefined`/`util/svg/element.ts`'s `element!`
+  // already establish) so `this.degree` genuinely starts `undefined`, exactly like the real
+  // engine's `self.degree` - `init()`'s `extend()` then takes the correct direct-assignment path
+  // for a real numeric `degree` config, matching real, observed site behavior (Playwright-
+  // verified against the live legacy site: these demos render correctly there, not NaN). This is
+  // the "genuine port-introduced divergence, not a preserved bug" case explicitly called out by
+  // this project's own rules - `getGridSize()`'s own header comment (grid/core.ts) documents the
+  // DOWNSTREAM `NaN`-coercion behavior as a preserved bug in its own right (real engine: e.g. a
+  // z-axis full-3D chart that ALSO configures a raw `{x,y,z}` object `degree` - that combination
+  // genuinely does still coerce to `NaN` in both the real engine and this port, unaffected by this
+  // fix) - this fix only corrects WHICH value `degree` actually holds by the time grids read it
+  // for the extremely common "single numeric `degree`" config shape, not that downstream
+  // NaN-coercion logic itself.
+  degree!: { x: number; y: number; z: number };
   depth = 0;
   perspective = 0.9;
 

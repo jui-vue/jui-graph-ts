@@ -318,18 +318,28 @@ export class CoreGrid extends Draw implements GridInstance {
     const result = { start, size, end };
 
     if (!this.axis.isFull3D()) {
-      // **Preserved bug, Node/hand-verified against the literal original, not obvious from a
-      // single read**: `depth > 0 || degree > 0` compares `degree` - an OBJECT (`{x,y,z}`, per
-      // `Axis.degree`'s real shape) - directly against the number `0`. JS's abstract relational
-      // comparison converts an object operand via `ToPrimitive`/`ToNumber` (no custom `valueOf`,
-      // falls through to `toString()` -> `"[object Object]"` -> `NaN`), so `degree > 0` is ALWAYS
-      // `false` - the condition reduces to just `depth > 0` in every real case. Worse: if this
-      // branch DOES run (because `depth > 0`), `math.radian(360 - degree)` performs the SAME
-      // object-to-number coercion (`360 - NaN` = `NaN`), so `x2`/`y2` below are always `NaN` too -
-      // silently poisoning `result.start`/`result.size`/`result.end` with `NaN` whenever a 2D
-      // (non-full-3D) grid has a nonzero `axis.depth` (a real, reachable "2D chart with depth
-      // offset" configuration, not a contrived edge case). Preserved exactly, not "fixed", per
-      // Phase 0 rule 6. Tested.
+      // CORRECTED framing (was previously documented here as producing `NaN` in "every real
+      // case" - that overstated it, see below): `depth > 0 || degree > 0` compares `degree`
+      // against the number `0` - when `degree` genuinely IS an object (`{x,y,z}`, the shape
+      // `Axis.setup()`'s own documented default uses), JS's abstract relational comparison
+      // coerces it via `ToPrimitive`/`ToNumber` (no custom `valueOf`, falls through to
+      // `toString()` -> `"[object Object]"` -> `NaN`), so `degree > 0` is `false` and, if this
+      // branch runs anyway (because `depth > 0`), `math.radian(360 - degree)` performs the SAME
+      // coercion (`360 - NaN` = `NaN`) - `x2`/`y2` below are `NaN`, silently poisoning
+      // `result.start`/`result.size`/`result.end`. This part IS a real, preserved bug (confirmed
+      // byte-identical in the real engine's own `chart.js` - same `_.extend`/coercion behavior),
+      // reachable whenever a 2D (non-full-3D) grid shares an axis with an ACTUAL object-shaped
+      // `degree` config.
+      //
+      // But `degree` is NOT always an object in practice - the extremely common case (the
+      // `bar3d`/`column3d`/`cylinder3d`/`bubble3d`/cluster/stack/fullstack family's own top-level
+      // `degree: 30`-style numeric config) is a real NUMBER here, and this branch handles that
+      // correctly (`30 > 0` is `true`, `radian(360-30)` is a real angle, `x2`/`y2` are real
+      // numbers) - see `base/axis.ts`'s `degree` field doc comment for the GENUINE PORT
+      // REGRESSION (now fixed) that used to make this TS port's `Axis.degree` wrongly stay an
+      // object even for a numeric config, poisoning this exact branch with `NaN` for that whole
+      // brush family. Tested (both the still-preserved object-degree `NaN` case and the
+      // now-correct numeric-degree case).
       if (depth > 0 || (degree as unknown as number) > 0) {
         const rad = radian(360 - (degree as unknown as number));
         const x2 = Math.cos(rad) * depth;

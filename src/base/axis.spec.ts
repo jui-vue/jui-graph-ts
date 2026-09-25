@@ -3,6 +3,7 @@ import { Axis, getRate } from "./axis";
 import type { AxisChart, AxisOptions, AreaBox, GridConstructor, GridInstance, GridRenderedScale } from "./axis";
 import { SVG } from "../util/svg";
 import { TransElement } from "../util/svg/element.transform";
+import { CoreGrid } from "../grid/core";
 
 // ---------------------------------------------------------------------------------------------
 // Test doubles - NOT the "fake grid implementation" Phase 0/this task's own instructions say not
@@ -554,5 +555,60 @@ describe("Axis - drawAxisBackground / createClipPath", () => {
         const axis = new Axis(chart, options, options);
         expect(axis.get("clipId")).toBe("axis-clip-id-7.5"); // chart.index=7 (see makeChart)
         expect(axis.get("clipRectId")).toBe("axis-clip-rect-id-7");
+    });
+});
+
+describe("Axis - degree field (GENUINE PORT REGRESSION, found and fixed - see the field's own doc comment)", () => {
+    // Root-caused by loading the real bar3d/column3d/cylinder3d/bubble3d/cluster/stack/fullstack
+    // family (13 real-site demos, all sharing a single axis with a numeric top-level `degree`/
+    // `depth` config plus a `grid3d`-typed "c" axis) directly against the live legacy site via
+    // Playwright: the real engine renders real, non-NaN `<path>`/`<g transform>` geometry - this
+    // TS port, before the fix, produced NaN throughout (traced to `Axis.degree` wrongly staying
+    // `{x:0,y:0,z:0}` - its class-field default - instead of the real numeric config value, for
+    // the entire lifetime of the FIRST `reload()` pass, i.e. exactly when `x`/`y`/`c`'s own grids
+    // render and read it).
+    it("a real numeric `degree` config (not the {x,y,z} object shape) is a real number immediately after construction, not silently reverted to the {x,y,z} default", () => {
+        const { chart } = makeChart();
+        const options = defaultAxisOptions({ degree: 30 as unknown as AxisOptions["degree"], depth: 20 });
+        const axis = new Axis(chart, options, options);
+
+        expect(axis.degree).toBe(30);
+        expect(axis.depth).toBe(20);
+    });
+
+    it("getGridSize() reads a real (non-NaN) degree/depth DURING the x-grid's own render, mid-reload() - not just after construction fully completes", () => {
+        // A manual post-construction getGridSize() call would pass even with the OLD bug, since
+        // reload()'s own tail (`this.degree = options.degree`, a direct assignment) always fixes
+        // `axis.degree` up by the time construction FINISHES - the actual bug only poisoned grids
+        // that read `axis.degree` DURING reload(), before that tail assignment runs (exactly what
+        // real x/y grids do inside their own render()/drawBefore()). This grid stand-in captures
+        // getGridSize()'s result from INSIDE its own render(), the same timing real grids use.
+        let capturedSize: { start: number; size: number; end: number } | null = null;
+
+        class CapturingGrid extends CoreGrid {
+            static setup(): Record<string, unknown> {
+                return {};
+            }
+            draw = (): { root: TransElement; scale: Record<string, unknown> } => {
+                capturedSize = this.getGridSize();
+                const root = this.chart.svg.group();
+                return { root, scale: {} };
+            };
+        }
+
+        const { chart } = makeChart({ x: 0, y: 0, x2: 400, y2: 300, width: 400, height: 300 });
+        (chart.gridTypes as Record<string, GridConstructor>).block = CapturingGrid as unknown as GridConstructor;
+
+        const options = defaultAxisOptions({
+            degree: 30 as unknown as AxisOptions["degree"],
+            depth: 20,
+            x: { orient: "bottom" },
+        });
+        new Axis(chart, options, options);
+
+        expect(capturedSize).not.toBeNull();
+        expect(Number.isNaN(capturedSize!.start)).toBe(false);
+        expect(Number.isNaN(capturedSize!.size)).toBe(false);
+        expect(Number.isNaN(capturedSize!.end)).toBe(false);
     });
 });
