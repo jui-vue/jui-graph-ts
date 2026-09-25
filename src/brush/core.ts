@@ -68,23 +68,21 @@
 //        inference gap this task's own real-source access corrects. Not fixed anywhere (no
 //        jui-chart-vue file needs editing per this task's scope), just documented for the record.
 //
-//   NEW FINDING (not previously inferrable without the real source - no jui-chart-vue writeup
-//   attempted this, since it required reading `getXY()`/`getStackXY()`'s tridiagonal-adjacent
-//   coordinate math directly): `builder.ts`'s own `defineOptions(ctor, options)` helper (already
-//   landed, line ~158) is a SIMPLIFIED one-level version (`ctor.setup()` only) of the original
-//   engine's real `jui.defineOptions` (`base/base.js` ~L1168: `getOptions(Module, {})`, which
-//   walks the WHOLE `extend` chain leaf-first - confirmed by reading that function directly). In
-//   the real original, a concrete brush like `chart.brush.line` gets its per-instance options
-//   merged from ITS OWN `setup()`, then `CoreBrush.setup()` (`target`/`colors`/`axis`/`index`/
-//   `clip`/`useEvent`), then `Draw.setup()` (`type`/`animate`) - the full 3-level chain, exactly
-//   like `Core.mergeOptions()` already does for `Builder`/`Plane` (see `base/core.ts`'s header
-//   comment). `builder.ts`'s current `defineOptions()` only ever applies the LEAF ctor's own
-//   `setup()` - so once a real `chart.brush.*` leaf class lands and gets `registerBrush()`'d, its
-//   instances will NOT automatically receive `CoreBrush.setup()`'s `clip: true`/`useEvent: true`/
-//   etc. defaults through `builder.ts`'s current wiring, unlike the real original engine. This is
-//   a pre-existing gap in `builder.ts` (not introduced by this task, and outside this task's own
-//   file-touch scope - a future reconciliation, flagged here for whoever ports the first real
-//   `chart.brush.*` leaf and notices its defaults aren't merging as expected).
+//   FIXED FINDING (originally found while reading `getXY()`/`getStackXY()`'s tridiagonal-adjacent
+//   coordinate math, before any downstream consumer existed to notice it in practice): `builder.ts`'s
+//   own `defineOptions(ctor, options)` helper USED TO BE a simplified one-level version (`ctor.setup()`
+//   only) of the original engine's real `jui.defineOptions` (`base/base.js` ~L1168: `getOptions(Module,
+//   {})`, which walks the WHOLE `extend` chain leaf-first). In the real original (and now, again,
+//   here), a concrete brush like `chart.brush.line` gets its per-instance options merged from ITS OWN
+//   `setup()`, then `CoreBrush.setup()` (`target`/`colors`/`axis`/`index`/`clip`/`useEvent`), then
+//   `Draw.setup()` (`type`/`animate`) - the full 3-level chain, exactly like `Core.mergeOptions()`
+//   already does for `Builder`/`Plane` (see `base/core.ts`'s header comment). This gap was confirmed
+//   for real once a downstream consumer (`jui-chart-vue`) registered its first real `chart.brush.*`/
+//   `chart.widget.*` leaves and hit exactly the predicted symptom (`CoreBrush`/`CoreWidget` defaults
+//   silently missing) - `builder.ts`'s `defineOptions()` now walks the full static-side prototype
+//   chain (`Object.getPrototypeOf(ctor)`, leaf-first, `hasOwnProperty`-guarded per level, same
+//   pattern `Core.mergeOptions()` already used) - see that function's own doc comment for the fix,
+//   and `builder.spec.ts`'s "merges the FULL extend chain leaf-first" regression tests.
 // ============================================================================================
 //
 // `getXY()`/`getStackXY()` - the real per-brush coordinate-resolution engine every concrete
@@ -321,8 +319,8 @@ export interface BrushOptions {
   /** @cfg {String} [type=null] Specifies the type of a brush (inherited default from
    * `Draw.setup()`, per the original's `extend:` chain - `CoreBrush.setup()` itself never
    * redeclares `type`/`animate`, matching `CoreGrid.setup()`/`CoreWidget.setup()`'s same
-   * "no automatic static-setup-chain merge" convention, see header comment's own new-finding
-   * note on `builder.ts`'s currently-simplified `defineOptions()`). */
+   * "each level only declares its own new keys" convention - `builder.ts`'s `defineOptions()`
+   * walks the full chain to fill these back in, see that function's own doc comment). */
   type?: string;
   [key: string]: unknown;
 }

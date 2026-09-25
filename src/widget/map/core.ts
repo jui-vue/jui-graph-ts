@@ -67,16 +67,16 @@
 // ============================================================================================
 // THE `static setup()` OVERRIDE - the one real thing this file adds
 //
-// `MapCoreWidget.setup()` returns `{ axis: 0 }` - a single config default, REPLACING (not
-// merging with) `CoreWidget.setup()`'s own `{ render: false, index: 0 }` return, per this
-// engine's own no-automatic-setup-chain-merge behavior (already documented precisely in
-// `brush/core.ts`'s header comment's "New finding" section: `base/builder.ts`'s current
-// `defineOptions()` only ever applies a leaf constructor's OWN `setup()`, not the full `extend`
-// chain the real original engine's `jui.defineOptions`/`getOptions()` would walk - a pre-existing
-// gap in `builder.ts`, not introduced here, flagged there as a follow-up). `axis: 0` mirrors
-// `Axis`'s own zero-based indexing convention (`base/axis.ts`) - a default "which configured axis
-// index this map-family widget applies to" config value, consistent in spirit with
-// `CoreWidget.getIndexArray()`'s own "operate on axis 0 unless told otherwise" default.
+// `MapCoreWidget.setup()` returns `{ axis: 0 }` - MERGED with (not replacing) `CoreWidget.setup()`'s
+// own `{ render: false, index: 0 }` and `Draw.setup()`'s `{ type: null, animate: false }`:
+// `base/builder.ts`'s `defineOptions()` walks a registered widget's ENTIRE `extend` chain
+// leaf-first (this class's own `setup()` first, then each ancestor's, real JS static-side
+// prototype walk), matching what the original engine's `jui.defineOptions`/`getOptions()` does -
+// a fix landed after this file's own port (see `builder.ts`'s `defineOptions()` doc comment for
+// the fix itself). `axis: 0` mirrors `Axis`'s own zero-based indexing convention (`base/axis.ts`) -
+// a default "which configured axis index this map-family widget applies to" config value,
+// consistent in spirit with `CoreWidget.getIndexArray()`'s own "operate on axis 0 unless told
+// otherwise" default.
 // ============================================================================================
 
 import { CoreWidget } from "../core";
@@ -95,9 +95,9 @@ export class MapCoreWidget extends CoreWidget {
 
   /**
    * @method setup
-   * 1:1 port of `MapCoreWidget.setup()`'s static defaults factory - `{ axis: 0 }`, REPLACING (not
-   * merging with) `CoreWidget.setup()`'s own defaults, per this engine's real no-automatic-chain-
-   * merge behavior (see header comment).
+   * 1:1 port of `MapCoreWidget.setup()`'s static defaults factory - `{ axis: 0 }`, now MERGED with
+   * (not replacing) `CoreWidget.setup()`/`Draw.setup()`'s own defaults via `defineOptions()`'s
+   * full-chain walk (see header comment).
    */
   static setup(): Record<string, unknown> {
     return {

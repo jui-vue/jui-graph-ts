@@ -125,6 +125,59 @@ describe('RangeGrid', () => {
     })
   })
 
+  describe('initDomain - min/max-only mode (domain left at its own null default) - regression ' +
+    'tests for a real, previously-shipped bug: the array-domain branch used to fire for ANY ' +
+    'non-string/non-function domain, including null, computing Math.min/max.apply(Math, null) ' +
+    '(= Infinity/-Infinity per the ECMAScript "apply with null/undefined args" rule) and ' +
+    'unconditionally overwriting any real configured min/max, collapsing the domain to [0,0] and ' +
+    'producing NaN for any real axis value. See initDomain()\'s own FIX comment for the full trace. ' +
+    'None of this describe block\'s scenarios were previously covered anywhere in this file - every ' +
+    'other test explicitly sets a string/function/array domain before calling initDomain().', () => {
+    it('domain: null with explicit non-zero min/max: resolves from the REAL configured bounds ' +
+      '(snapped out to whole `unit` multiples, same snapping every other domain form already ' +
+      'does - contrast the [3,27]->[3,27]/step=8 array-domain test above), not [0,0]', () => {
+      const g = makeRangeGrid()
+      g.grid = makeGrid({ domain: null, min: 10, max: 90, step: 10 }) as any
+
+      // unit = ceil((90-10)/10) = 8; start snaps up from 0 by 8s past 90 -> 96; end snaps down
+      // from 96 by 8s past 10 -> 8. domain = [end, start] = [8, 96], step = |8-96|/8 = 11.
+      const domain = g.initDomain()
+      expect(Array.from(domain)).toEqual([8, 96])
+      expect(domain.step).toBe(11)
+    })
+
+    it('domain: null with min: 0 (the "explicit 0 is falsy" quirk, shared with DateGrid and left ' +
+      'untouched by this fix) still resolves max correctly, not [0,0]/NaN', () => {
+      const g = makeRangeGrid()
+      g.grid = makeGrid({ domain: null, min: 0, max: 100, step: 10 }) as any
+
+      const domain = g.initDomain()
+      expect(Array.from(domain)).toEqual([0, 100])
+      expect(domain.step).toBe(10)
+    })
+
+    it('domain: null with BOTH min/max left at their own 0 defaults: degrades gracefully to [0, 0] ' +
+      '(no domain configured at all) rather than the previous Infinity/-Infinity/NaN collapse', () => {
+      const g = makeRangeGrid()
+      g.grid = makeGrid({ domain: null, min: 0, max: 0 }) as any
+
+      expect(g.initDomain()).toEqual([0, 0])
+    })
+
+    it('the resulting scale produces REAL numeric output for a real value (not NaN) end-to-end ' +
+      'through drawBefore(), matching a real <Chart> axis config of {type: "range", min, max} with ' +
+      'no domain array', () => {
+      const g = makeRangeGrid()
+      g.grid = makeGrid({ domain: null, min: 10, max: 90, step: 10, orient: 'bottom' }) as any
+      g.axis = makeAxisStub({ area: { x: 0, y: 0, x2: 400, y2: 300, width: 400, height: 300 } })
+
+      g.drawBefore()
+
+      expect(Number.isNaN((g.scale as any)(50))).toBe(false)
+      expect(typeof (g.scale as any)(50)).toBe('number')
+    })
+  })
+
   describe(
     'initDomain - string domain, PRESERVED BUGS: (1) Math.max/min called directly on a per-row ' +
       'array value (no .apply/spread - NaN for multi-element arrays), unlike the function-domain ' +

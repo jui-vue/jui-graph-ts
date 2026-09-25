@@ -208,8 +208,16 @@ export class RangeGrid extends CoreGrid {
     const data = this.data() as Record<string, unknown>[]
     let value_list: number[] = []
     let isArray = false
+    // Tracks whether ANY of the three `grid.domain` branches below actually ran (string/function/
+    // array) - distinct from `value_list.length > 0`, which a real string/function domain could
+    // still legitimately reach with an empty array (e.g. `data.length === 0`) and whose existing
+    // behavior in that edge case (`Math.min/max.apply(Math, [])` = `Infinity`/`-Infinity`,
+    // preserved as-is) this fix does not touch - only the previously-unhandled "domain is null/
+    // undefined entirely" case is new here (see FIX note below).
+    let hasDomainSource = false
 
     if (typeof this.grid.domain === 'string') {
+      hasDomainSource = true
       const field = this.grid.domain
 
       value_list = new Array(data.length)
@@ -231,6 +239,7 @@ export class RangeGrid extends CoreGrid {
         }
       }
     } else if (typeof this.grid.domain === 'function') {
+      hasDomainSource = true
       value_list = new Array(data.length)
 
       let isCheck = false
@@ -253,20 +262,54 @@ export class RangeGrid extends CoreGrid {
           }
         }
       }
-    } else {
+    } else if (Array.isArray(this.grid.domain)) {
+      hasDomainSource = true
       value_list = this.grid.domain as number[]
       isArray = true
     }
+    // else: `domain` is `null`/`undefined` (its own documented default, `RangeGrid.setup()`'s
+    // `domain: null`) - the "min/max-only" usage mode, see FIX note below. `value_list` stays `[]`
+    // and neither branch below runs; `min`/`max` fall through unchanged from the `this.grid.min`/
+    // `this.grid.max` reads above (defaulting to `0` next, matching `RangeGrid.setup()`'s own
+    // `min: 0, max: 0` defaults).
 
-    const tempMin = Math.min.apply(Math, value_list)
-    const tempMax = Math.max.apply(Math, value_list)
+    // FIX (previously a real, verified bug - RangeGrid-specific, NOT a blanket fix of the
+    // analogous-shaped `DateGrid.initDomain()` issue, which stays intentionally preserved/
+    // undocumented-as-fixed per this project's own precedent): the `else` branch above used to
+    // fire for ANY non-string/non-function `domain` value - including `null`/`undefined`, not just
+    // a real array - unconditionally setting `isArray = true` and computing `Math.min/max.apply(
+    // Math, value_list)` against a `null`/`undefined` `value_list`. Per the ECMAScript spec,
+    // `Function.prototype.apply(thisArg, null | undefined)` means "call with zero arguments", so
+    // this silently evaluated to `Math.min()`/`Math.max()` = `Infinity`/`-Infinity` - which then
+    // UNCONDITIONALLY OVERWROTE any real, explicitly-configured `min`/`max` (the documented,
+    // intended way to use a range axis without a `domain` array at all), collapsing the scale's
+    // domain to `[0, 0]` (verified: `unit = div(max-min, step)` with `max=-Infinity, min=Infinity`
+    // drives both the `while (start < max)` and `while (end > min)` loops to never execute) and
+    // producing `NaN` for any non-zero input value. Confirmed via a downstream consumer
+    // (`jui-chart-vue`) hitting this in real, otherwise-correctly-configured charts - and via
+    // Node-tracing that NONE of this file's own `range.spec.ts` tests ever left `domain` at its
+    // real default (every test explicitly overrode it to a string/function/array before calling
+    // `initDomain()`), so this exact case had zero test coverage. Now: the array-only branch is
+    // gated on `Array.isArray(this.grid.domain)`, and a `null`/`undefined` domain takes neither
+    // branch, leaving `value_list` empty and `min`/`max` untouched by this step - handled by the
+    // `hasDomainSource` guard below instead of the previous unconditional `Math.min/max.apply`
+    // call (guarding on `hasDomainSource`, not `value_list.length`, so a real string/function
+    // domain that happens to produce an empty `value_list` - e.g. no data rows - still takes the
+    // exact same `Math.min/max.apply(Math, [])` path it always did, unchanged).
+    if (hasDomainSource) {
+      const tempMin = Math.min.apply(Math, value_list)
+      const tempMax = Math.max.apply(Math, value_list)
 
-    if (isArray) {
-      min = tempMin
-      max = tempMax
+      if (isArray) {
+        min = tempMin
+        max = tempMax
+      } else {
+        if (typeof min == 'undefined' || min > tempMin) min = tempMin
+        if (typeof max == 'undefined' || max < tempMax) max = tempMax
+      }
     } else {
-      if (typeof min == 'undefined' || min > tempMin) min = tempMin
-      if (typeof max == 'undefined' || max < tempMax) max = tempMax
+      if (typeof min == 'undefined') min = 0
+      if (typeof max == 'undefined') max = 0
     }
 
     let unit: number

@@ -256,7 +256,7 @@ export { CoreWidget } from './widget/core'
 // in `getXY()` and the preserved `eachData(callback, reverse)` swapped-argument-order quirk.
 export { CoreBrush } from './brush/core'
 export type { BrushChart, BrushOptions, BrushAxisScale, BrushData, BrushEventPayload, BrushMouseEvent, BrushSeriesXY, BrushTooltip } from './brush/core'
-export type { WidgetConfig } from './widget/core'
+export type { WidgetChart, WidgetConfig } from './widget/core'
 
 // `chart.brush.canvas.core`/`chart.brush.polygon.core`/`chart.brush.map.core` - the three
 // `CoreBrush`-derived bases every concrete `chart.brush.*` leaf ultimately extends (SVG-side
@@ -295,7 +295,7 @@ export { PolygonCoreWidget } from './widget/polygon/core'
 // at all (so it still inherits `CoreWidget`'s real CSS-class-stamping behavior) - it only adds a
 // vestigial 3-parameter (`chart, axis, widget`, all unused in the body - real wiring happens
 // externally via `base/builder.ts`'s `drawWidget()`, same as every other Phase E base class)
-// constructor and a `static setup()` override returning `{ axis: 0 }` (replacing, not merging
-// with, `CoreWidget.setup()`'s own defaults - per this engine's real no-automatic-setup-chain-merge
-// behavior, already documented in `brush/core.ts`'s header comment).
+// constructor and a `static setup()` override returning `{ axis: 0 }`, MERGED with (not replacing)
+// `CoreWidget.setup()`/`Draw.setup()`'s own defaults via `defineOptions()`'s full-chain walk (see
+// `base/builder.ts`'s `defineOptions()` doc comment).
 export { MapCoreWidget } from './widget/map/core'

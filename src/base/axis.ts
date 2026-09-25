@@ -154,6 +154,39 @@ function extend(origin: unknown, add: unknown, skip?: boolean): Record<string, u
   return target;
 }
 
+/**
+ * Approximates `jui.defineOptions(Ctor, options)` for a grid/map constructor: fills in keys
+ * missing from `options`, walking `ctor`'s ENTIRE static `setup()` chain leaf-first (its own
+ * `setup()` first, then each ancestor's own `setup()`, via the real JS static-side prototype
+ * chain) - the same walk `base/core.ts`'s `Core.mergeOptions()` and `base/builder.ts`'s
+ * `defineOptions()` already do for `Builder`/`Plane`/registered brushes/widgets.
+ *
+ * FIX (previously a real, documented gap - now closed): `drawGridType()`/`drawMapType()` below
+ * used to merge ONLY the concrete `GridCtor`/`MapCtor`'s own `setup()` (e.g. `BlockGrid.setup()`,
+ * which never declares `dist`/`orient`/`hide`/`color`/`realtime` at all) - never walking up to
+ * `CoreGrid.setup()` (where those actually live) or `Draw.setup()` - so `gridCfg.dist` stayed
+ * `undefined` unless a caller set it explicitly, producing a `NaN` grid transform (`chart.area("y")
+ * + area("y2") + undefined`) for every grid, every time. Verified via a downstream consumer
+ * (`jui-chart-vue`) hitting exactly this in a real rendered chart.
+ */
+function mergeSetupChain(ctor: { setup?: () => unknown } | null | undefined, options: Record<string, unknown>): Record<string, unknown> {
+  // `any`, not `unknown`, deliberately: mirrors `base/builder.ts`'s own `defineOptions()` (the
+  // analogous brush/widget-side fix) - walking a constructor's static prototype chain via
+  // `Object.getPrototypeOf` has no type-safe representation in TS (each level's real static shape
+  // is a different, unrelated constructor type), so this stays loosely typed like that file's own
+  // equivalent loop rather than fighting the type system with intermediate `unknown` casts.
+  let current: any = ctor;
+
+  while (typeof current === "function") {
+    if (Object.prototype.hasOwnProperty.call(current, "setup") && typeof current.setup === "function") {
+      extend(options, current.setup(), true);
+    }
+    current = Object.getPrototypeOf(current);
+  }
+
+  return options;
+}
+
 /** `_.deepClone(obj, emit)` - ported verbatim from `base/base.js`. */
 function deepClone(obj: unknown, emit?: Record<string, boolean>): unknown {
   const skip = emit || {};
@@ -473,10 +506,10 @@ export class Axis {
     const GridCtor = this.chart.gridTypes[gridCfg.type as string];
     if (!GridCtor) return null;
 
-    // 그리드 기본 옵션과 사용자 옵션을 합침 (merge grid defaults with user options)
-    if (GridCtor.setup) {
-      extend(gridCfg, GridCtor.setup(), true);
-    }
+    // 그리드 기본 옵션과 사용자 옵션을 합침 (merge grid defaults with user options) - walks the
+    // FULL GridCtor -> CoreGrid -> Draw static setup() chain, not just GridCtor's own (see
+    // `mergeSetupChain()`'s doc comment).
+    mergeSetupChain(GridCtor, gridCfg);
 
     // 엑시스 기본 프로퍼티 정의 (define axis base properties)
     const obj = new GridCtor(this.chart, this, gridCfg);
@@ -517,9 +550,8 @@ export class Axis {
     const MapCtor = this.chart.mapType;
     if (!MapCtor) return null;
 
-    if (MapCtor.setup) {
-      extend(mapCfg, MapCtor.setup(), true);
-    }
+    // Same full-chain merge as `drawGridType()` above, applied consistently here too.
+    mergeSetupChain(MapCtor, mapCfg);
 
     // 맵 객체는 한번만 생성함 (only construct the map object once)
     if (this.map == null) {

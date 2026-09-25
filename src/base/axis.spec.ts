@@ -242,6 +242,37 @@ describe("Axis - drawGridType / grid wiring", () => {
         expect(xConfig.dist).toBe(0);
     });
 
+    it("merges the FULL GridConstructor extend chain leaf-first, not just the leaf class's own " +
+        "setup() (regression test for a real, previously-shipped gap - see mergeSetupChain()'s " +
+        "doc comment in axis.ts; StubGrid above returns `dist` from its OWN setup() directly, so " +
+        "it never exercised a real multi-level CoreGrid-like ancestor chain the way this does)", () => {
+        class BaseGridLike extends StubGrid {
+            static setup(): Record<string, unknown> {
+                return { fromBase: "base-default", overridden: "base-value" };
+            }
+        }
+        class LeafGrid extends BaseGridLike {
+            static setup(): Record<string, unknown> {
+                return { fromLeaf: "leaf-default", overridden: "leaf-value" };
+            }
+        }
+
+        const { chart } = makeChart();
+        (chart.gridTypes as Record<string, GridConstructor>).block = LeafGrid as unknown as GridConstructor;
+        const xConfig: Record<string, unknown> = { type: "block" };
+        const options = defaultAxisOptions({ x: xConfig });
+        new Axis(chart, options, options);
+
+        // Both the leaf's own default AND its ancestor's (`BaseGridLike`'s) default must be
+        // present - not just the leaf's.
+        expect(xConfig.fromLeaf).toBe("leaf-default");
+        expect(xConfig.fromBase).toBe("base-default");
+        // Where both levels declare the same key, the more-leaf value wins.
+        expect(xConfig.overridden).toBe("leaf-value");
+        // And StubGrid's own `dist: 0` (the "grandparent" level here) still comes through too.
+        expect(xConfig.dist).toBe(0);
+    });
+
     it("positions a left-oriented y-grid's root via translate(chart.x + axis.x - dist, chart.y)", () => {
         const { chart } = makeChart({ x: 0, y: 0, x2: 400, y2: 300, width: 400, height: 300 });
         const yConfig: Record<string, unknown> = { orient: "left", dist: 5 };

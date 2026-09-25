@@ -152,12 +152,36 @@ function deepClone(obj: any, emit?: Record<string, boolean>): any {
 }
 
 /** Approximates `jui.defineOptions(Ctor, options)`: fills in only the keys missing from
- * `options`, recursively, from `Ctor.setup()`'s defaults (`extend(options, defaults, true)`).
- * `jui.defineOptions` itself lives in `base/manager.js` (unported, future phase) - this is a
- * best-understanding stand-in for its well-documented shape, not a verified 1:1 port. */
+ * `options`, recursively, walking `Ctor`'s ENTIRE static `setup()` chain leaf-first - `Ctor`'s own
+ * `setup()` first, then each ancestor class's own `setup()` in turn (via the real JS static-side
+ * prototype chain, `Object.getPrototypeOf(ctor)`), each merged with `skip: true` so an earlier
+ * (more-leaf) level's value always wins and a later (more-ancestor) level only fills in whatever's
+ * still missing. This is the same walk `Core.mergeOptions()` (`base/core.ts`) already does for
+ * `Builder`/`Plane` themselves - `jui.defineOptions` itself lives in `base/manager.js` (unported),
+ * but its well-documented behavior (`getOptions()`'s parent-chain walk in the real original) is
+ * exactly this, not a one-level-only merge.
+ *
+ * FIX (previously a real, documented gap - now closed): this function used to call ONLY
+ * `ctor.setup()` (the leaf class's own defaults), never walking up to e.g. `CoreBrush.setup()`/
+ * `CoreWidget.setup()`/`Draw.setup()` - meaning any concrete `chart.brush.*`/`chart.widget.*` leaf
+ * registered via `registerBrush`/`registerWidget` never automatically received `CoreBrush`'s
+ * `clip: true`/`useEvent: true`/etc. or `CoreWidget`'s `render: false`/`index: 0` or `Draw`'s
+ * `type: null`/`animate: false` defaults unless the leaf's own `setup()` duplicated them by hand.
+ * Also used by `drawAxis()` below for `AxisImpl` (a single-level `Axis` class with no parent, so
+ * unaffected in practice there) and by `drawBrush()`/`drawWidget()` for every registered brush/
+ * widget (the actually-affected call sites). */
 function defineOptions(ctor: { setup?: () => any }, options: any): any {
-  const defaults = typeof ctor.setup === "function" ? ctor.setup() : {};
-  return extend(options || {}, defaults, true);
+  const result = options || {};
+  let current: any = ctor;
+
+  while (typeof current === "function") {
+    if (Object.prototype.hasOwnProperty.call(current, "setup") && typeof current.setup === "function") {
+      extend(result, current.setup(), true);
+    }
+    current = Object.getPrototypeOf(current);
+  }
+
+  return result;
 }
 
 // ---- forward-reference stand-in for base/axis.js (concurrent, unported) -----------------------
@@ -675,9 +699,61 @@ export class Builder extends Core<BuilderOptions> {
     }
   }
 
+  /** The marker attribute used to find/tag the `<style>` this method injects - see this method's
+   * own doc comment for why (deduplication) it's needed, and why a marker attribute rather than
+   * re-parsing an existing rule's `cssText`/`font-family`. */
+  private static readonly ICON_STYLE_MARKER = "data-jui-icon-type";
+
+  /**
+   * Injects an `@font-face` rule for `this._options.icon.type`/`.path` so `chart.text()`'s
+   * `{key}`-style icon placeholders (`parseIconInText()`) have a font backing their Private-Use-
+   * Area codepoints. Deviates from the real original engine's own technique in two ways - not a
+   * routine port:
+   *
+   * 1. **No `CSSStyleSheet.insertRule()`.** The real original (`base/builder.js`) - and this port,
+   *    until now, byte-for-byte identically - creates an EMPTY `<style>`, appends it to
+   *    `document.head`, THEN calls `.sheet.insertRule(rule, 0)` on it a moment later: two separate
+   *    CSSOM mutations. This method instead sets the FULL rule text via `.textContent` BEFORE the
+   *    element is appended - one atomic mutation, and a strictly more conventional way to build a
+   *    stylesheet than mutating an already-live one. **This change is NOT a confirmed fix for
+   *    anything** - see the OPEN ISSUE note below.
+   * 2. **A deduplication guard, CONFIRMED FIXED.** Neither the real original engine nor this port
+   *    (until now) had any guard against calling this more than once for the same `icon.type` -
+   *    `Builder.init()` (this method's own single call site) runs unconditionally on every
+   *    `mount()`, and a downstream consumer that constructs a fresh `Builder` per reactive
+   *    re-render (e.g. `jui-chart-vue`'s `<Chart>`, which never cleans up `document.head` on
+   *    unmount/remount) would accumulate one orphaned `<style>`/`@font-face` per mount
+   *    indefinitely - confirmed empirically as 44 duplicate entries on a 44-`<Chart>` demo page,
+   *    and confirmed fixed (down to exactly 1) after this change. A marker attribute (not
+   *    re-parsing an existing rule's serialized `cssText`, which is both fragile - the CSSOM can
+   *    normalize/reorder property text - and, in this project's own test environment, doesn't even
+   *    round-trip an `@font-face`'s `src` value) lets this method cheaply recognize "a style for
+   *    this exact `icon.type` already exists" and skip re-injecting a redundant, identical rule.
+   *
+   * **OPEN ISSUE, NOT FIXED - icon glyphs still render as "tofu" (missing-glyph boxes) in real
+   * Chromium, despite this change.** An earlier investigation claimed switching away from
+   * `insertRule()` fixed this (based on an isolated repro that appeared to confirm it), but a
+   * later, more rigorous controlled A/B re-test DISPROVED that: `insertRule()` and this method's
+   * current `.textContent` technique both paint the glyph correctly OR both fail, depending on
+   * something else entirely (bisected to an unrelated artifact of the minimal repro's own HTML
+   * structure, not present in a real app's `index.html`) - the original "confirmed" finding was a
+   * confounded test, not a real fix. The real root cause of the glyph-painting failure is UNKNOWN.
+   * Every other layer is independently confirmed correct: codepoint resolution, font file loading
+   * (`document.fonts` reports `status: "loaded"`), and the `@font-face` rule's own presence/content
+   * in `document.head` (exactly once, per the dedup fix above). This method is kept as written
+   * (dropping `insertRule()` is at worst neutral, and the dedup guard is independently valuable)
+   * but should NOT be read as having resolved glyph painting - see `jui-chart-vue`'s
+   * `register/icon/classic.ts` header comment for the consumer-facing version of this same note.
+   *
+   * Both changes are additive to the real original's OWN behavior wherever `icon.path` was never
+   * configured at all (the existing `typeCheck(["string","array"], icon.path)` early return, kept
+   * unchanged below) - i.e. nothing changes for a chart that doesn't use icon fonts.
+   */
   private setVectorFontIcons(): void {
     const icon = this._options.icon;
     if (!typeCheck(["string", "array"], icon.path)) return;
+
+    if (document.head.querySelector(`style[${Builder.ICON_STYLE_MARKER}="${icon.type}"]`)) return;
 
     const pathList: string[] = typeCheck("string", icon.path) ? [icon.path as string] : (icon.path as string[]);
     const urlList: string[] = [];
@@ -700,17 +776,15 @@ export class Builder extends Core<BuilderOptions> {
     }
 
     const fontFace = "font-family: " + icon.type + "; font-weight: normal; font-style: normal; src: " + urlList.join(",");
+    const rule = "@font-face {" + fontFace + "}";
 
-    (function (rule: string) {
-      const sheet = (function () {
-        const style = document.createElement("style");
-        style.appendChild(document.createTextNode(""));
-        document.head.appendChild(style);
-        return style.sheet;
-      })();
-
-      sheet!.insertRule(rule, 0);
-    })("@font-face {" + fontFace + "}");
+    const style = document.createElement("style");
+    style.setAttribute(Builder.ICON_STYLE_MARKER, icon.type);
+    // Full rule text set BEFORE appending to `document.head` - see this method's own doc comment,
+    // point 1, for why this exact ordering (not "append then set `textContent`", which reproduces
+    // the same broken two-step timing as the dropped `insertRule()` technique) is load-bearing.
+    style.textContent = rule;
+    document.head.appendChild(style);
   }
 
   private parseIconInText(text: string): string {

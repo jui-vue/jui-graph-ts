@@ -130,12 +130,19 @@ export function RGBtoHSV(R: number, G: number, B: number): HsvColor {
   return coreRGBtoHSV(R, G, B)
 }
 
-/** Lightens (positive `rate`) or darkens (negative `rate`) a `#rrggbb` color string. */
-export function lighten(color: string, rate: number): string {
+/** Lightens (positive `rate`) or darkens (negative `rate`) a `#rrggbb` color string.
+ * `rate` defaults to `0` (a no-op passthrough), matching the underlying `jui-core-ts` function
+ * this wraps (`lighten(color, rate = 0)`) - this wrapper had dropped that default, making `rate` a
+ * required argument here even though real call sites (e.g. legacy `chart.widget.tooltip`'s
+ * `ColorUtil.lighten(color)`, ported to this project's `jui-chart-vue` consumer) call it with only
+ * one argument. */
+export function lighten(color: string, rate = 0): string {
   return coreLighten(color, rate)
 }
 
-export function darken(color: string, rate: number): string {
+/** See `lighten()`'s doc comment - `rate` defaults to `0` here too, for the same reason and
+ * matching `jui-core-ts`'s own `darken(color, rate = 0)` signature. */
+export function darken(color: string, rate = 0): string {
   return coreDarken(color, rate)
 }
 

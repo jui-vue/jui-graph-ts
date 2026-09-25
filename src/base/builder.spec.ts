@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   Builder,
   registerAxis,
@@ -301,6 +301,72 @@ describe("Builder", () => {
 
       expect(captured.target).toEqual(["foo", "bar"]);
     });
+
+    it("defineOptions() merges the FULL extend chain leaf-first, not just the leaf class's own setup() " +
+      "(regression test for a real, previously-shipped gap - see defineOptions()'s doc comment)", () => {
+      class FakeCoreBrushLike extends (FakeDraw as any) {
+        static setup(): Record<string, unknown> {
+          return { fromCore: "core-default", overridden: "core-value" };
+        }
+      }
+      class FakeLeafBrush extends FakeCoreBrushLike {
+        static setup(): Record<string, unknown> {
+          return { fromLeaf: "leaf-default", overridden: "leaf-value" };
+        }
+      }
+
+      let captured: any;
+      class Spy3 extends (FakeLeafBrush as any) {
+        constructor(_chart: any, _axis: any, options: any) {
+          super(_chart, _axis, options);
+          captured = options;
+        }
+      }
+      registerBrush("test.chain-merge.spy", Spy3 as unknown as DrawConstructor);
+
+      mountBuilder({
+        axis: [{ data: [{ a: 1 }] }],
+        brush: [{ type: "test.chain-merge.spy" }],
+      });
+
+      // Both the leaf's own default AND its ancestor's default must be present...
+      expect(captured.fromLeaf).toBe("leaf-default");
+      expect(captured.fromCore).toBe("core-default");
+      // ...and where both levels declare the SAME key, the more-leaf (more specific) class's own
+      // value wins - matching `extend(..., true)`'s "only fill what's still missing" semantics
+      // applied leaf-first.
+      expect(captured.overridden).toBe("leaf-value");
+    });
+
+    it("defineOptions() applies the same full-chain merge for registered widgets", () => {
+      class FakeCoreWidgetLike extends (FakeDraw as any) {
+        static setup(): Record<string, unknown> {
+          return { render: false, fromCore: "core-default" };
+        }
+      }
+      class FakeLeafWidget extends FakeCoreWidgetLike {
+        static setup(): Record<string, unknown> {
+          return { fromLeaf: "leaf-default" };
+        }
+      }
+
+      let captured: any;
+      class WidgetSpy2 extends (FakeLeafWidget as any) {
+        constructor(_chart: any, _axis: any, options: any) {
+          super(_chart, _axis, options);
+          captured = options;
+        }
+      }
+      registerWidget("test.widget-chain-merge.spy", WidgetSpy2 as unknown as DrawConstructor);
+
+      mountBuilder({
+        axis: [{ data: [{ a: 1 }] }],
+        widget: [{ type: "test.widget-chain-merge.spy" }],
+      });
+
+      expect(captured.fromLeaf).toBe("leaf-default");
+      expect(captured.fromCore).toBe("core-default");
+    });
   });
 
   describe("addBrush/removeBrush/updateBrush/addWidget/removeWidget/updateWidget", () => {
@@ -369,6 +435,76 @@ describe("Builder", () => {
       const builder = mountBuilder();
       const g = builder.texts({ "font-size": 10 }, ["a", "b"]);
       expect(g.children.length).toBe(2);
+    });
+  });
+
+  describe("setVectorFontIcons() (icon.path -> @font-face injection)", () => {
+    // Every prior icon.* test above configures `path: null`, which hits this method's own early
+    // return before ever reaching the @font-face injection - none of them exercise this code path
+    // at all. These do, and also clean up after themselves since `document.head` is shared,
+    // uncleaned, global state across every `it()` in this file (unlike `builder.root`, a fresh
+    // detached `<div>` per `mountBuilder()` call).
+    afterEach(() => {
+      document.head.querySelectorAll("style[data-jui-icon-type]").forEach((el) => el.remove());
+    });
+
+    function fontFaceStyles(type: string): HTMLStyleElement[] {
+      return Array.from(document.head.querySelectorAll(`style[data-jui-icon-type="${type}"]`));
+    }
+
+    it("injects a <style data-jui-icon-type> whose full @font-face rule text is set via textContent - not via CSSStyleSheet.insertRule()", () => {
+      mountBuilder({ icon: { type: "vftest-basic", path: "/fonts/icomoon.woff" } });
+
+      const styles = fontFaceStyles("vftest-basic");
+      expect(styles.length).toBe(1);
+
+      // The defining, deliberate difference from the dropped `insertRule()` technique: the rule
+      // text is present as real markup content, not inserted into an initially-empty stylesheet
+      // after the fact.
+      expect(styles[0].textContent).toContain("@font-face");
+      expect(styles[0].textContent).toContain("font-family: vftest-basic");
+      expect(styles[0].textContent).toContain("/fonts/icomoon.woff");
+      expect(styles[0].textContent).toContain("format('woff')");
+    });
+
+    it("builds one url()/format() src entry per path when icon.path is an array, picking the format from each file extension", () => {
+      mountBuilder({
+        icon: {
+          type: "vftest-multi",
+          path: ["/fonts/icomoon.eot", "/fonts/icomoon.woff", "/fonts/icomoon.ttf", "/fonts/icomoon.svg"],
+        },
+      });
+
+      const rule = fontFaceStyles("vftest-multi")[0].textContent!;
+      expect(rule).toContain("format('embedded-opentype')");
+      expect(rule).toContain("format('woff')");
+      expect(rule).toContain("format('truetype')");
+      expect(rule).toContain("format('svg')");
+    });
+
+    it("does nothing when icon.path is null (unchanged early-return behavior)", () => {
+      mountBuilder({ icon: { type: "vftest-nopath", path: null } });
+      expect(fontFaceStyles("vftest-nopath").length).toBe(0);
+    });
+
+    it("regression: mounting a second Builder with the SAME icon.type does not inject a duplicate <style>/@font-face", () => {
+      mountBuilder({ icon: { type: "vftest-dedup", path: "/fonts/icomoon.woff" } });
+      expect(fontFaceStyles("vftest-dedup").length).toBe(1);
+
+      // A second, independent Builder instance/mount - e.g. a second `<Chart>` on the same page,
+      // or the SAME `<Chart>` remounting on a reactive prop change (this project's own
+      // `jui-chart-vue` `<Chart>` always constructs a fresh `Builder` rather than reusing one) -
+      // configured with the identical icon type.
+      mountBuilder({ icon: { type: "vftest-dedup", path: "/fonts/icomoon.woff" } });
+      expect(fontFaceStyles("vftest-dedup").length).toBe(1);
+
+      // A THIRD mount with a DIFFERENT icon.type is unaffected by the dedup guard - it's scoped
+      // per `icon.type`, not a global "only ever inject once" latch.
+      mountBuilder({ icon: { type: "vftest-dedup-other", path: "/fonts/icomoon.woff" } });
+      expect(fontFaceStyles("vftest-dedup").length).toBe(1);
+      expect(fontFaceStyles("vftest-dedup-other").length).toBe(1);
+
+      document.head.querySelectorAll('style[data-jui-icon-type="vftest-dedup-other"]').forEach((el) => el.remove());
     });
   });
 

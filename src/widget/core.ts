@@ -117,6 +117,7 @@
 
 import { Draw } from "../base/draw";
 import type { TransElement } from "../util/svg/element.transform";
+import type { SVG } from "../util/svg";
 
 // ---- inlined `util/base.js` typeCheck/startsWith (same per-file convention as `util/dom.ts`,
 // `base/axis.ts`, `base/builder.ts`, `base/core.ts`, `base/draw.ts`, `grid/core.ts` - no shared
@@ -152,6 +153,56 @@ function startsWith(str: string, searchString: string, position?: number): boole
   return str.lastIndexOf(searchString, pos) === pos;
 }
 
+/**
+ * This file's own minimal slice of the real chart (`Builder`) surface a `chart.widget.*` leaf
+ * needs - narrower override of `Draw`'s own `chart!: DrawChartLike` field, the same convention
+ * `brush/core.ts`'s `CoreBrush` already established with its own `BrushChart` interface (and
+ * `grid/core.ts`'s `CoreGrid` with `GridChart`). Kept as its OWN named interface (not a reuse of
+ * `BrushChart`, even though the two currently happen to need an identical member set) since the
+ * `chart.brush.*`/`chart.widget.*` families are genuinely separate concerns in the original engine
+ * (different `extend:` targets below `Draw`, different `base/builder.ts` wiring methods -
+ * `drawBrush()`/`drawWidget()` - different per-instance config field - `brush`/`widget`) and a
+ * downstream consumer (a concrete `chart.widget.*` leaf class) should not have to import a
+ * "brush"-named type to type its own `this.chart`. Covers every `Builder` member the three
+ * currently-registered downstream leaf widgets (title/tooltip/legend, in `jui-chart-vue`) call:
+ * `svg`/`text`/`texts`/`theme`/`area`/`padding`/`axis`/`get`/`color`/`emit`/`isRender`/`render`/
+ * `updateBrush`/`setCache`/`getCache`, plus `on`/`format?` (inherited, unmodified, from `Draw`'s
+ * own `chart.on(...)`/`chart.format` calls - see `Draw`'s and this class's own `on()`).
+ */
+export interface WidgetChart {
+  /** `Draw.on()`'s `this.chart.on(type, handler, resetType)` / `CoreWidget.on()`'s own override
+   * of the same call (`this.isRender() ? "render" : "renderAll"` as `resetType`). */
+  on(type: string, callback: (...args: any[]) => any, resetType?: string): any;
+  /** `Draw.on()`'s per-axis dispatch guard `self.chart.axis(self.axis.index)`; also a widget's own
+   * `chart.axis(widget.axis)` lookup (a DIFFERENT axis than `this.axis`, e.g. `chart.widget.title`). */
+  axis(index?: number): any;
+  /** `Draw.format()`'s fallback when a widget doesn't define its own `format`. */
+  format?: (...args: any[]) => any;
+  /** Getter form (no key) returns the whole area box; keyed form returns one `x`/`y`/`x2`/`y2`/
+   * `width`/`height` value - matches `Builder.area()`'s real overloaded signature. */
+  area(): { x: number; y: number; x2: number; y2: number; width: number; height: number };
+  area(key: string): number;
+  /** Matches `Builder.padding()`'s real overloaded signature. */
+  padding(): { top: number; bottom: number; left: number; right: number };
+  padding(key: string): number;
+  svg: SVG;
+  root: HTMLElement;
+  color(key1?: any, key2?: any): string;
+  theme(key?: any, value?: any, value2?: any): any;
+  text(attr: Record<string, any>, textOrCallback?: string | ((this: any) => void)): any;
+  texts(attr: Record<string, any>, texts: string[], lineBreakRate?: number): any;
+  /** `Builder.get("axis"|"brush"|"widget"|"padding"|"area", key?)` - a widget reading e.g. another
+   * brush's config (`chart.get("brush", index)`, as `chart.widget.tooltip`/`chart.widget.legend`
+   * both do). */
+  get(type: string, key?: any): any;
+  emit(type: string, args?: any[]): any;
+  isRender(): boolean;
+  render(isAll?: boolean): void;
+  updateBrush(index: number, brush: any, isReset?: boolean): void;
+  setCache(key: string, value: any): void;
+  getCache(key: string, defValue?: any): any;
+}
+
 /** Minimal shape `CoreWidget`'s own methods need from `this.widget` (real shape: a widget entry
  * from `BuilderOptions.widget[]`, wired onto the instance by `base/builder.ts`'s `drawWidget()`
  * as `draw.widget = draws[i]`) - `render` (`isRender()`) and `type` (`drawAfter()`'s CSS class).
@@ -180,6 +231,7 @@ export interface WidgetConfig {
  * `grid/core.ts`'s `CoreGrid` already established for the sibling `grid.*` family.
  */
 export class CoreWidget extends Draw {
+  declare chart: WidgetChart;
   declare widget: WidgetConfig;
 
   /**
