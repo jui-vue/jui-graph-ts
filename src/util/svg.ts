@@ -96,13 +96,16 @@ export class SVG extends SVG3d {
     }
   }
 
+  /** Only strips listeners from a child that's genuinely still connected to the live DOM (a
+   * stale element from a previous render) - see `clear()`'s own doc comment for why this guard,
+   * and its call-BEFORE-removal ordering there, both matter. */
   private removeEventAll(target: SvgElement): void {
     const childs = target.children;
 
     for (let i = 0, len = childs.length; i < len; i++) {
       const child = childs[i];
 
-      if (child) {
+      if (child && child.element.parentNode) {
         child.off();
 
         if (child.children.length > 0) {
@@ -181,26 +184,48 @@ export class SVG extends SVG3d {
     return this.root.size();
   }
 
-  /** Detaches all of `main`'s (and, if `isAll`, `sub`'s) currently-rendered DOM nodes and events. */
+  /**
+   * Detaches all of `main`'s (and, if `isAll`, `sub`'s) currently-rendered DOM nodes and events.
+   *
+   * **Ordering matters, and is a deliberate fix (not a preserved-as-is port) over an earlier
+   * version of this method**: `removeEventAll()` must run BEFORE the DOM-removal loop below, while
+   * a stale (previous-render) child still has a real `parentNode`. `render()` (see its own doc
+   * comment) calls this method a SECOND time per render pass - once via `reset()` before drawing,
+   * and once (no-argument) on its own right before `appendAll()` - and that second call's
+   * `mainGroup.children` holds only THIS render's brand-new elements, which never had a
+   * `parentNode` in the first place (not yet inserted into the live DOM). Running
+   * `removeEventAll()` first, gated on `parentNode`, lets it tell "genuinely stale, already-live
+   * element from a prior render" (strip its listeners) apart from "freshly drawn, not-yet-attached
+   * element from the render in progress" (leave its listeners alone) - both cases look identical
+   * to `removeEventAll()` if it runs AFTER the removal loop, since `removeChild()` clears
+   * `parentNode` on the stale ones too. Confirmed via the real bug this fixes: EVERY brush's mouse
+   * event (`click`/`dblclick`/`contextmenu`/hover) was silently non-functional - `addEvent()`
+   * genuinely called `elem.on(...)`/`addEventListener()` on every brush element, but by the time
+   * this render pass's own trailing `clear()` call ran, `removeEventAll()` had already stripped
+   * every one of those just-attached listeners before `appendAll()` ever inserted the elements into
+   * the document - reproduced with a real bar/column click never reaching its configured
+   * `event.click`/`.on("click"/"rclick", ...)` handler, confirmed fixed (dispatches correctly)
+   * after reordering, and confirmed absent on the real legacy engine (a live-site A/B check).
+   */
   clear(isAll?: boolean): void {
     const main = this.mainGroup;
+    this.removeEventAll(this.mainGroup);
+
     main.each(function (this: SvgElement) {
       if (this.element.parentNode) {
         main.element.removeChild(this.element);
       }
     });
 
-    this.removeEventAll(this.mainGroup);
-
     if (isAll === true) {
       const sub = this.subGroup;
+      this.removeEventAll(this.subGroup);
+
       sub.each(function (this: SvgElement) {
         if (this.element.parentNode) {
           sub.element.removeChild(this.element);
         }
       });
-
-      this.removeEventAll(this.subGroup);
     }
   }
 
